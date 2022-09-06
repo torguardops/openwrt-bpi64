@@ -14,7 +14,7 @@ jobs:
               run: bash compile-openwrt.sh
 
             - name: TAR Output
-              run: tar -cvf images.tar openwrt/bin/targets
+              run: tar -cvf images.tar openwrt/bin/targets/mediatek/mt7622
 
             - name: Upload artifacts
               uses: actions/upload-artifact@v2
@@ -46,4 +46,4 @@ jobs:
                 prerelease: true
                 title: "Updated prebuilt images ${{ env.NOW }}"
                 automatic_release_tag: "images-${{ env.NOW }}"
-                files: openwrt/bin/targets/*
+                files: openwrt/bin/targets/mediatek/mt7622/*
