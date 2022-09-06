@@ -1,0 +1,53 @@
+
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option ula_prefix 'fd63:62f4:a53f::/48'
+
+config device
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'lan1'
+	list ports 'lan2'
+	list ports 'lan3'
+	list ports 'lan4'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ipaddr '192.168.0.1'
+	option netmask '255.255.255.0'
+	option ip6assign '60'
+
+config interface 'wan'
+	option device 'wan'
+	option proto 'dhcp'
+
+config interface 'wan6'
+	option device 'wan'
+	option proto 'dhcpv6'
+
+config interface 'wg'
+	option proto 'wireguard'
+	list addresses '0.0.0.0'
+
+config wireguard_wg
+	list allowed_ips '0.0.0.0/0'
+	list allowed_ips '::/0'
+	option route_allowed_ips '1'
+	option endpoint_host '0.0.0.0'
+	option persistent_keepalive '25'
+
+config interface 'docker'
+	option device 'docker0'
+	option proto 'none'
+	option auto '0'
+
+config device
+	option type 'bridge'
+	option name 'docker0'
+
