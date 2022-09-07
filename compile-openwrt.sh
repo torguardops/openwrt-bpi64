@@ -11,11 +11,6 @@ PACKAGES="firewall iptables docker docker-compose dockerd luci-app-dockerman luc
             luci-base luci-ssl luci-mod-admin-full luci-theme-bootstrap \
             htop debootstrap luci-compat luci-lib-ipkg dnsmasq luci-app-ttyd"
 
-
-# Dont change this on dot changes, such as .2 to .3
-OPENWRT_PACKAGES_BRANCH='openwrt-21.02'
-
-
 # Do not change these as they are used by the script
 BASEDIR="${PWD}"
 
@@ -62,34 +57,27 @@ if [ -d "${BASEDIR}/patches" ]; then
     done
 fi
 
-# Create our feeds.conf to use the one always up to date
-say "Creating our own feeds.conf"
-cat << EOF > feeds.conf
-src-git-full packages https://git.openwrt.org/feed/packages.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full luci https://git.openwrt.org/project/luci.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
-EOF
+# Copy in the custom files directory if it exists - this adds our scripts and files to openwrt
+[ -d "${BASEDIR}/files" ] && { say "Copying our custom files into openwrt folder"; cp -R "${BASEDIR}/files/" "${BASEDIR}/openwrt/"; } || { say "No files directory found"; exit 1; }
+
+# Get the feeds used to build this release
+say "Fetching our feeds"
+wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/feeds.buildinfo -O feeds.conf
 
 # Run feed commands pre-build, do this before creating our .config as it did not work when ran after
 say "Updating and Installing Feeds"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# Copy in the custom files directory if it exists - this adds our scripts and files to openwrt
-[ -d "${BASEDIR}/files" ] && { say "Copying our custom files into openwrt folder"; cp -R "${BASEDIR}/files/" "${BASEDIR}/openwrt/"; } || { say "No files directory found"; exit 1; }
-
 # Download our "base" .config from openwrt
 say "Fetching our .config"
-wget https://archive.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/config.buildinfo -O .config
+wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/config.buildinfo -O .config
 
 # Write out our custom flags to the existing .config
 say "Set build to only be for our selected board"
 cat << EOF >> .config
 CONFIG_TARGET_KERNEL_PARTSIZE=128
 CONFIG_TARGET_ROOTFS_PARTSIZE=8000
-CONFIG_IB=n
-CONFIG_SDK=n
 EOF
 
 # Write the packages we want to install to the .config
@@ -106,4 +94,4 @@ make defconfig
 
 # Go forth and build our OpenWRT image
 say "Running the actual make process with $(nproc) processors"
-make -j$(nproc)
+#make -j$(nproc)
