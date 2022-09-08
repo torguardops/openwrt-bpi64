@@ -75,11 +75,6 @@ fi
 # say "Fetching our feeds"
 # wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/feeds.buildinfo -O feeds.conf
 
-# Run feed commands pre-build, do this before creating our .config as it did not work when ran after
-say "Updating and Installing Feeds"
-./scripts/feeds update -a
-./scripts/feeds install -a
-
 # Download our "base" .config from openwrt
 say "Fetching our .config"
 wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/config.buildinfo -O .config
@@ -98,6 +93,11 @@ for PACKAGE in ${PACKAGES}; do
     say "Adding ${PACKAGE} to .config"
     echo "CONFIG_PACKAGE_${PACKAGE}=y" >> .config
 done
+
+# Run feed commands pre-build, do this before creating our .config as it did not work when ran after
+say "Updating and Installing Feeds"
+./scripts/feeds update -a
+./scripts/feeds install -a
 
 # Generate our final .config for image building
 say "Running make defconfig to generate .config"
