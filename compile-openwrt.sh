@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # Change these to fit the versions you want to compile
-OPENWRT_VERSION='21.02.3'
+OPENWRT_VERSION='22.03.0'
 
 # Dont change this on dot changes, such as .2 to .3
-OPENWRT_PACKAGES_BRANCH='openwrt-21.02'
+# OPENWRT_PACKAGES_BRANCH='openwrt-21.02'
 
 # These are your packages you want in the build
 PACKAGES="firewall iptables docker docker-compose dockerd luci-app-dockerman luci-lib-docker \
@@ -41,7 +41,7 @@ say() {
 }
 
 # If we have an openwrt directory, we want to start fresh so alert us and exit
-[ -d "${BASEDIR}/openwrt" ] && { say "Found existing openwrt directory, please delete it before running this script"; exit 1; }
+[ -d "${BASEDIR}/openwrt" ] && { say "Found existing openwrt directory, deleting it"; rm -rf "${BASEDIR}/openwrt"; }
 
 # Clone openwrt from its git repo and fetch the branch we want to compile
 say "Cloning openwrt"
@@ -52,12 +52,13 @@ say "Checking out OpenWRT ${OPENWRT_VERSION}"
 git checkout v${OPENWRT_VERSION}
 
 say "Creating our own feeds.conf"
-cat << EOF > feeds.conf
-src-git-full packages https://git.openwrt.org/feed/packages.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full luci https://git.openwrt.org/project/luci.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
-EOF
+wget -O feeds.conf https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/feeds.buildinfo
+# cat << EOF > feeds.conf
+# src-git-full packages https://git.openwrt.org/feed/packages.git;${OPENWRT_PACKAGES_BRANCH}
+# src-git-full luci https://git.openwrt.org/project/luci.git;${OPENWRT_PACKAGES_BRANCH}
+# src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
+# src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
+# EOF
 
 # If we have any patches to install, do it now
 say "Running Patches"
@@ -80,28 +81,28 @@ say "Fetching our .config"
 wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/config.buildinfo -O .config
 
 # Write out our custom flags to the existing .config
-say "Set build to only be for our selected board"
-cat << EOF >> .config
-CONFIG_TARGET_ROOTFS_EXT4FS=y
-CONFIG_TARGET_EXT4_RESERVED_PCT=0
-CONFIG_TARGET_EXT4_BLOCKSIZE_4K=y
-# CONFIG_TARGET_EXT4_BLOCKSIZE_2K is not set
-# CONFIG_TARGET_EXT4_BLOCKSIZE_1K is not set
-CONFIG_TARGET_EXT4_BLOCKSIZE=4096
-CONFIG_TARGET_EXT4_JOURNAL=y
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
-CONFIG_TARGET_UBIFS_JOURNAL_SIZE=""
-CONFIG_TARGET_IMAGES_GZIP=y
-CONFIG_TARGET_KERNEL_PARTSIZE=128
-CONFIG_TARGET_ROOTFS_PARTSIZE=8000
-EOF
+# say "Set build to only be for our selected board"
+# cat << EOF >> .config
+# CONFIG_TARGET_ROOTFS_EXT4FS=y
+# CONFIG_TARGET_EXT4_RESERVED_PCT=0
+# CONFIG_TARGET_EXT4_BLOCKSIZE_4K=y
+# # CONFIG_TARGET_EXT4_BLOCKSIZE_2K is not set
+# # CONFIG_TARGET_EXT4_BLOCKSIZE_1K is not set
+# CONFIG_TARGET_EXT4_BLOCKSIZE=4096
+# CONFIG_TARGET_EXT4_JOURNAL=y
+# CONFIG_TARGET_ROOTFS_SQUASHFS=y
+# CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
+# CONFIG_TARGET_UBIFS_JOURNAL_SIZE=""
+# CONFIG_TARGET_IMAGES_GZIP=y
+# CONFIG_TARGET_KERNEL_PARTSIZE=128
+# CONFIG_TARGET_ROOTFS_PARTSIZE=8000
+# EOF
 
 # Write the packages we want to install to the .config
 say "Fixing our our .config"
 
 for PACKAGE in ${PACKAGES}; do
-    say "Adding ${PACKAGE} to .config"
+    #say "Adding ${PACKAGE} to .config"
     echo "CONFIG_PACKAGE_${PACKAGE}=y" >> .config
 done
 
