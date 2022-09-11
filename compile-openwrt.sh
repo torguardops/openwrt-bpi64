@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Change these to fit the versions you want to compile
-OPENWRT_VERSION='22.03.0'
+OPENWRT_VERSION='21.02.3'
 
 # Dont change this on dot changes, such as .2 to .3
 # OPENWRT_PACKAGES_BRANCH='openwrt-21.02'
@@ -45,11 +45,11 @@ say() {
 
 # Clone openwrt from its git repo and fetch the branch we want to compile
 say "Cloning openwrt"
-git clone https://git.openwrt.org/openwrt/openwrt.git
+git clone -b "v${OPENWRT_VERSION}" https://git.openwrt.org/openwrt/openwrt.git
 cd openwrt
-git fetch -t
-say "Checking out OpenWRT ${OPENWRT_VERSION}"
-git checkout v${OPENWRT_VERSION}
+# git fetch -t
+# say "Checking out OpenWRT ${OPENWRT_VERSION}"
+# git checkout v${OPENWRT_VERSION}
 
 say "Creating our own feeds.conf"
 wget -O feeds.conf https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/feeds.buildinfo
@@ -59,6 +59,11 @@ wget -O feeds.conf https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/t
 # src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
 # src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
 # EOF
+
+# Run feed commands pre-build, do this before creating our .config as it did not work when ran after
+say "Updating and Installing Feeds"
+./scripts/feeds update -a
+./scripts/feeds install -a
 
 # If we have any patches to install, do it now
 say "Running Patches"
@@ -102,14 +107,9 @@ wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediate
 say "Fixing our our .config"
 
 for PACKAGE in ${PACKAGES}; do
-    #say "Adding ${PACKAGE} to .config"
+    say "Adding ${PACKAGE} to .config"
     echo "CONFIG_PACKAGE_${PACKAGE}=y" >> .config
 done
-
-# Run feed commands pre-build, do this before creating our .config as it did not work when ran after
-say "Updating and Installing Feeds"
-./scripts/feeds update -a
-./scripts/feeds install -a
 
 # Generate our final .config for image building
 say "Running make defconfig to generate .config"
