@@ -1,0 +1,799 @@
+diff --git a/include/image-commands.mk b/include/image-commands.mk
+index 4d54a14ba4..b050b9dad3 100644
+--- a/include/image-commands.mk
++++ b/include/image-commands.mk
+@@ -27,6 +27,10 @@ define Build/append-kernel
+ 	dd if=$(IMAGE_KERNEL) >> $@
+ endef
+ 
++define Build/append-image
++	dd if=$(BIN_DIR)/$(IMG_PREFIX)$(if $(PROFILE_SANITIZED),-$(PROFILE_SANITIZED))-$(1) >> $@
++endef
++
+ compat_version=$(if $(DEVICE_COMPAT_VERSION),$(DEVICE_COMPAT_VERSION),1.0)
+ json_quote=$(subst ','\'',$(subst ",\",$(1)))
+ #")')
+diff --git a/package/boot/uboot-mediatek/Makefile b/package/boot/uboot-mediatek/Makefile
+index c46b906cb5..6904b39938 100644
+--- a/package/boot/uboot-mediatek/Makefile
++++ b/package/boot/uboot-mediatek/Makefile
+@@ -3,6 +3,7 @@ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_VERSION:=2020.10
+ PKG_HASH:=0d481bbdc05c0ee74908ec2f56a6daa53166cc6a78a0e4fac2ac5d025770a622
++PKG_BUILD_DEPENDS:=arm-trusted-firmware-tools/host
+ 
+ include $(INCLUDE_DIR)/u-boot.mk
+ include $(INCLUDE_DIR)/package.mk
+@@ -14,12 +15,42 @@ define U-Boot/Default
+   DEFAULT:=y
+ endef
+ 
+-define U-Boot/mt7622
+-  NAME:=MT7622
++define U-Boot/mt7622_rfb1
++  NAME:=MT7622 Reference Board 1
+   BUILD_SUBTARGET:=mt7622
+   UBOOT_CONFIG:=mt7622_rfb
+ endef
+ 
++define U-Boot/mt7622_linksys_e8450
++  NAME:=Linksys E8450
++  BUILD_SUBTARGET:=mt7622
++  UBOOT_CONFIG:=mt7622_linksys_e8450
++  UBOOT_IMAGE:=u-boot.fip
++  BL2_BOOTDEV:=snand
++  BL2_DDRBLOB:=1
++  DEPENDS:=+trusted-firmware-a-mt7622-snand-1ddr
++endef
++
++define U-Boot/mt7622_bananapi_bpi-r64-emmc
++  NAME:=BananaPi R64 (eMMC)
++  BUILD_SUBTARGET:=mt7622
++  UBOOT_CONFIG:=mt7622_bananapi_bpi-r64-emmc
++  UBOOT_IMAGE:=u-boot.fip
++  BL2_BOOTDEV:=emmc
++  BL2_DDRBLOB:=2
++  DEPENDS:=+trusted-firmware-a-mt7622-emmc-2ddr
++endef
++
++define U-Boot/mt7622_bananapi_bpi-r64-sdmmc
++  NAME:=BananaPi R64 (SDMMC)
++  BUILD_SUBTARGET:=mt7622
++  UBOOT_CONFIG:=mt7622_bananapi_bpi-r64-sdmmc
++  UBOOT_IMAGE:=u-boot.fip
++  BL2_BOOTDEV:=sdmmc
++  BL2_DDRBLOB:=2
++  DEPENDS:=+trusted-firmware-a-mt7622-sdmmc-2ddr
++endef
++
+ define U-Boot/mt7623a_unielec_u7623
+   NAME:=UniElec U7623 (mt7623)
+   BUILD_SUBTARGET:=mt7623
+@@ -39,15 +70,40 @@ define U-Boot/mt7629
+   UBOOT_CONFIG:=mt7629_rfb
+ endef
+ 
+-UBOOT_TARGETS := mt7629 mt7622 mt7623n_bpir2 mt7623a_unielec_u7623
++UBOOT_TARGETS := \
++	mt7629 \
++	mt7622_bananapi_bpi-r64-emmc \
++	mt7622_bananapi_bpi-r64-sdmmc \
++	mt7622_linksys_e8450 \
++	mt7622_rfb1 \
++	mt7623n_bpir2 \
++	mt7623a_unielec_u7623
+ 
+-UBOOT_MAKE_FLAGS += $(UBOOT_IMAGE)
++UBOOT_MAKE_FLAGS += $(UBOOT_IMAGE:.fip=.bin)
+ 
+ Build/Exports:=$(Host/Exports)
+ 
++define Build/fip-image
++	$(STAGING_DIR_HOST)/bin/fiptool create \
++		--soc-fw $(STAGING_DIR_IMAGE)/$(BUILD_SUBTARGET)-$(BL2_BOOTDEV)-$(BL2_DDRBLOB)ddr-bl31.bin \
++		--nt-fw $(PKG_BUILD_DIR)/u-boot.bin \
++		$(PKG_BUILD_DIR)/u-boot.fip
++endef
++
++define Build/Compile
++	$(call Build/Compile/U-Boot)
++ifeq ($(UBOOT_IMAGE),u-boot.fip))
++	$(call Build/fip-image)
++endif
++endef
++
++# don't stage files to bindir, let target/linux/mediatek/image/*.mk do that
++define Package/u-boot/install
++endef
++
+ define Build/InstallDev
+ 	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
+-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-$(UBOOT_IMAGE)
++	$(INSTALL_DATA) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-$(UBOOT_IMAGE)
+ endef
+ 
+ $(eval $(call BuildPackage/U-Boot))
+diff --git a/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch b/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch
+index dc3ebaf7af..5d3e94ac86 100644
+--- a/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch
++++ b/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch
+@@ -85,11 +85,9 @@ Signed-off-by: Xiangsheng Hou <xiangsheng.hou@mediatek.com>
+  create mode 100644 drivers/mtd/nandx/include/internal/nandx_util.h
+  create mode 100644 drivers/mtd/nandx/include/uboot/nandx_os.h
+ 
+-diff --git a/drivers/mtd/Kconfig b/drivers/mtd/Kconfig
+-index 5e7571cf3d..34a59b44b9 100644
+ --- a/drivers/mtd/Kconfig
+ +++ b/drivers/mtd/Kconfig
+-@@ -101,6 +101,13 @@ config HBMC_AM654
++@@ -108,6 +108,13 @@ config HBMC_AM654
+  	 This is the driver for HyperBus controller on TI's AM65x and
+  	 other SoCs
+  
+@@ -103,11 +101,9 @@ index 5e7571cf3d..34a59b44b9 100644
+  source "drivers/mtd/nand/Kconfig"
+  
+  source "drivers/mtd/spi/Kconfig"
+-diff --git a/drivers/mtd/Makefile b/drivers/mtd/Makefile
+-index 318788c5e2..1df1031b23 100644
+ --- a/drivers/mtd/Makefile
+ +++ b/drivers/mtd/Makefile
+-@@ -41,3 +41,7 @@ obj-$(CONFIG_$(SPL_TPL_)SPI_FLASH_SUPPORT) += spi/
++@@ -41,3 +41,7 @@ obj-$(CONFIG_$(SPL_TPL_)SPI_FLASH_SUPPOR
+  obj-$(CONFIG_SPL_UBI) += ubispl/
+  
+  endif
+@@ -115,8 +111,6 @@ index 318788c5e2..1df1031b23 100644
+ +ifeq ($(CONFIG_MTK_SPI_NAND), y)
+ +include $(srctree)/drivers/mtd/nandx/Nandx.mk
+ +endif
+-diff --git a/drivers/mtd/nand/raw/nand.c b/drivers/mtd/nand/raw/nand.c
+-index 026419e4e6..4be0c7d8f3 100644
+ --- a/drivers/mtd/nand/raw/nand.c
+ +++ b/drivers/mtd/nand/raw/nand.c
+ @@ -91,8 +91,10 @@ static void nand_init_chip(int i)
+@@ -130,9 +124,6 @@ index 026419e4e6..4be0c7d8f3 100644
+  
+  	nand_register(i, mtd);
+  }
+-diff --git a/drivers/mtd/nandx/NOTICE b/drivers/mtd/nandx/NOTICE
+-new file mode 100644
+-index 0000000000..1a06ca3867
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/NOTICE
+ @@ -0,0 +1,52 @@
+@@ -189,9 +180,6 @@ index 0000000000..1a06ca3867
+ +
+ +####################################################################################################
+ \ No newline at end of file
+-diff --git a/drivers/mtd/nandx/Nandx.config b/drivers/mtd/nandx/Nandx.config
+-new file mode 100644
+-index 0000000000..35705ee28d
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/Nandx.config
+ @@ -0,0 +1,17 @@
+@@ -212,9 +200,6 @@ index 0000000000..35705ee28d
+ +NANDX_NFI_BASE := y
+ +NANDX_NFI_ECC := y
+ +NANDX_NFI_SPI := y
+-diff --git a/drivers/mtd/nandx/Nandx.mk b/drivers/mtd/nandx/Nandx.mk
+-new file mode 100644
+-index 0000000000..f5a6f2a628
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/Nandx.mk
+ @@ -0,0 +1,91 @@
+@@ -309,9 +294,6 @@ index 0000000000..f5a6f2a628
+ +clean:
+ +	rm -rf $(sim-obj) nandx
+ +endif
+-diff --git a/drivers/mtd/nandx/README b/drivers/mtd/nandx/README
+-new file mode 100644
+-index 0000000000..0feaeaeb88
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/README
+ @@ -0,0 +1,31 @@
+@@ -346,9 +328,6 @@ index 0000000000..0feaeaeb88
+ +    Any block of above graph can be extended at your will, if you
+ +want add new feature into this code, please make sure that your code
+ +would follow the framework, and we will be appreciated about it.
+-diff --git a/drivers/mtd/nandx/core/Nandx.mk b/drivers/mtd/nandx/core/Nandx.mk
+-new file mode 100644
+-index 0000000000..7a5661c044
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/Nandx.mk
+ @@ -0,0 +1,38 @@
+@@ -390,9 +369,6 @@ index 0000000000..7a5661c044
+ +nandx-header-$(NANDX_NFI_ECC) += nfi/nfiecc_regs.h
+ +nandx-header-$(NANDX_NFI_SPI) += nfi/nfi_spi.h
+ +nandx-header-$(NANDX_NFI_SPI) += nfi/nfi_spi_regs.h
+-diff --git a/drivers/mtd/nandx/core/core_io.c b/drivers/mtd/nandx/core/core_io.c
+-new file mode 100644
+-index 0000000000..716eeed38d
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/core_io.c
+ @@ -0,0 +1,735 @@
+@@ -1131,9 +1107,6 @@ index 0000000000..716eeed38d
+ +	return ret;
+ +}
+ +#endif
+-diff --git a/drivers/mtd/nandx/core/core_io.h b/drivers/mtd/nandx/core/core_io.h
+-new file mode 100644
+-index 0000000000..edcb60908a
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/core_io.h
+ @@ -0,0 +1,39 @@
+@@ -1176,9 +1149,6 @@ index 0000000000..edcb60908a
+ +};
+ +
+ +#endif /* __CORE_IO_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand/device_spi.c b/drivers/mtd/nandx/core/nand/device_spi.c
+-new file mode 100644
+-index 0000000000..db338c28c2
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/device_spi.c
+ @@ -0,0 +1,200 @@
+@@ -1382,9 +1352,6 @@ index 0000000000..db338c28c2
+ +	return &spi_nand[index].dev;
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nand/device_spi.h b/drivers/mtd/nandx/core/nand/device_spi.h
+-new file mode 100644
+-index 0000000000..1676b61fc8
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/device_spi.h
+ @@ -0,0 +1,132 @@
+@@ -1520,9 +1487,6 @@ index 0000000000..1676b61fc8
+ +u8 spi_replace_tx_col_cycle(u8 mode);
+ +
+ +#endif /* __DEVICE_SPI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand/nand_spi.c b/drivers/mtd/nandx/core/nand/nand_spi.c
+-new file mode 100644
+-index 0000000000..2ae03e1cf4
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/nand_spi.c
+ @@ -0,0 +1,526 @@
+@@ -2052,9 +2016,6 @@ index 0000000000..2ae03e1cf4
+ +	nand_base_exit(spi->parent);
+ +	mem_free(spi);
+ +}
+-diff --git a/drivers/mtd/nandx/core/nand/nand_spi.h b/drivers/mtd/nandx/core/nand/nand_spi.h
+-new file mode 100644
+-index 0000000000..e55e4de6f7
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/nand_spi.h
+ @@ -0,0 +1,35 @@
+@@ -2093,9 +2054,6 @@ index 0000000000..e55e4de6f7
+ +}
+ +
+ +#endif /* __NAND_SPI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand_base.c b/drivers/mtd/nandx/core/nand_base.c
+-new file mode 100644
+-index 0000000000..65998e5460
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_base.c
+ @@ -0,0 +1,304 @@
+@@ -2403,9 +2361,6 @@ index 0000000000..65998e5460
+ +	nfi_exit(base->nfi);
+ +	mem_free(base);
+ +}
+-diff --git a/drivers/mtd/nandx/core/nand_base.h b/drivers/mtd/nandx/core/nand_base.h
+-new file mode 100644
+-index 0000000000..13217978e5
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_base.h
+ @@ -0,0 +1,71 @@
+@@ -2480,9 +2435,6 @@ index 0000000000..13217978e5
+ +int nand_detect_device(struct nand_base *nand);
+ +
+ +#endif /* __NAND_BASE_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand_chip.c b/drivers/mtd/nandx/core/nand_chip.c
+-new file mode 100644
+-index 0000000000..02adc6f52e
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_chip.c
+ @@ -0,0 +1,272 @@
+@@ -2758,9 +2710,6 @@ index 0000000000..02adc6f52e
+ +	nand_exit(chip->nand);
+ +	mem_free(chip);
+ +}
+-diff --git a/drivers/mtd/nandx/core/nand_chip.h b/drivers/mtd/nandx/core/nand_chip.h
+-new file mode 100644
+-index 0000000000..3e9c8e6ca3
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_chip.h
+ @@ -0,0 +1,103 @@
+@@ -2867,9 +2816,6 @@ index 0000000000..3e9c8e6ca3
+ +struct nand_chip *nand_chip_init(struct nfi_resource *res);
+ +void nand_chip_exit(struct nand_chip *chip);
+ +#endif /* __NAND_CHIP_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand_device.c b/drivers/mtd/nandx/core/nand_device.c
+-new file mode 100644
+-index 0000000000..9f6764d1bc
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_device.c
+ @@ -0,0 +1,285 @@
+@@ -3158,9 +3104,6 @@ index 0000000000..9f6764d1bc
+ +	return 0;
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nand_device.h b/drivers/mtd/nandx/core/nand_device.h
+-new file mode 100644
+-index 0000000000..e142cf529d
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_device.h
+ @@ -0,0 +1,608 @@
+@@ -3772,9 +3715,6 @@ index 0000000000..e142cf529d
+ +
+ +struct nand_device *nand_get_device(int index);
+ +#endif /* __NAND_DEVICE_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi.h b/drivers/mtd/nandx/core/nfi.h
+-new file mode 100644
+-index 0000000000..ba84e73ccc
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi.h
+ @@ -0,0 +1,51 @@
+@@ -3829,9 +3769,6 @@ index 0000000000..ba84e73ccc
+ +void nfi_exit(struct nfi *nfi);
+ +
+ +#endif /* __NFI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_base.c b/drivers/mtd/nandx/core/nfi/nfi_base.c
+-new file mode 100644
+-index 0000000000..d8679d7aa3
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_base.c
+ @@ -0,0 +1,1357 @@
+@@ -5192,9 +5129,6 @@ index 0000000000..d8679d7aa3
+ +	nfi_extend_exit(nb);
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_base.h b/drivers/mtd/nandx/core/nfi/nfi_base.h
+-new file mode 100644
+-index 0000000000..ae894eaa31
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_base.h
+ @@ -0,0 +1,95 @@
+@@ -5293,9 +5227,6 @@ index 0000000000..ae894eaa31
+ +void nfi_extend_exit(struct nfi_base *nb);
+ +
+ +#endif /* __NFI_BASE_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_regs.h b/drivers/mtd/nandx/core/nfi/nfi_regs.h
+-new file mode 100644
+-index 0000000000..ba4868acc8
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_regs.h
+ @@ -0,0 +1,114 @@
+@@ -5413,9 +5344,6 @@ index 0000000000..ba4868acc8
+ +
+ +#endif /* __NFI_REGS_H__ */
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_spi.c b/drivers/mtd/nandx/core/nfi/nfi_spi.c
+-new file mode 100644
+-index 0000000000..67cd0aaad9
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_spi.c
+ @@ -0,0 +1,689 @@
+@@ -6108,9 +6036,6 @@ index 0000000000..67cd0aaad9
+ +	mem_free(nfi_spi);
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_spi.h b/drivers/mtd/nandx/core/nfi/nfi_spi.h
+-new file mode 100644
+-index 0000000000..a52255663a
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_spi.h
+ @@ -0,0 +1,44 @@
+@@ -6158,9 +6083,6 @@ index 0000000000..a52255663a
+ +};
+ +
+ +#endif /* __NFI_SPI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_spi_regs.h b/drivers/mtd/nandx/core/nfi/nfi_spi_regs.h
+-new file mode 100644
+-index 0000000000..77adf46782
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_spi_regs.h
+ @@ -0,0 +1,64 @@
+@@ -6228,9 +6150,6 @@ index 0000000000..77adf46782
+ +#define SPI_GPRAM_ADDR          0x800
+ +
+ +#endif /* __NFI_SPI_REGS_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfiecc.c b/drivers/mtd/nandx/core/nfi/nfiecc.c
+-new file mode 100644
+-index 0000000000..14246fbc3e
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfiecc.c
+ @@ -0,0 +1,510 @@
+@@ -6744,9 +6663,6 @@ index 0000000000..14246fbc3e
+ +	mem_free(ecc);
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfiecc.h b/drivers/mtd/nandx/core/nfi/nfiecc.h
+-new file mode 100644
+-index 0000000000..b02a5c3534
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfiecc.h
+ @@ -0,0 +1,90 @@
+@@ -6840,9 +6756,6 @@ index 0000000000..b02a5c3534
+ +void nfiecc_exit(struct nfiecc *ecc);
+ +
+ +#endif /* __NFIECC_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfiecc_regs.h b/drivers/mtd/nandx/core/nfi/nfiecc_regs.h
+-new file mode 100644
+-index 0000000000..96564cf872
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfiecc_regs.h
+ @@ -0,0 +1,51 @@
+@@ -6897,9 +6810,6 @@ index 0000000000..96564cf872
+ +#define NFIECC_DECEL(x)         (0x120 + (x) * 4)
+ +
+ +#endif /* __NFIECC_REGS_H__ */
+-diff --git a/drivers/mtd/nandx/driver/Nandx.mk b/drivers/mtd/nandx/driver/Nandx.mk
+-new file mode 100644
+-index 0000000000..3fb93d37c5
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/driver/Nandx.mk
+ @@ -0,0 +1,18 @@
+@@ -6921,9 +6831,6 @@ index 0000000000..3fb93d37c5
+ +nandx-$(NANDX_KERNEL_SUPPORT) += kernel/driver.c
+ +nandx-$(NANDX_LK_SUPPORT) += lk/driver.c
+ +nandx-$(NANDX_UBOOT_SUPPORT) += uboot/driver.c
+-diff --git a/drivers/mtd/nandx/driver/bbt/bbt.c b/drivers/mtd/nandx/driver/bbt/bbt.c
+-new file mode 100644
+-index 0000000000..c9d4823e09
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/driver/bbt/bbt.c
+ @@ -0,0 +1,408 @@
+@@ -7335,9 +7242,6 @@ index 0000000000..c9d4823e09
+ +
+ +	return get_bbt_mark(g_bbt_manager.bbt, block) != BBT_BLOCK_GOOD;
+ +}
+-diff --git a/drivers/mtd/nandx/driver/uboot/driver.c b/drivers/mtd/nandx/driver/uboot/driver.c
+-new file mode 100644
+-index 0000000000..7bd3342452
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/driver/uboot/driver.c
+ @@ -0,0 +1,574 @@
+@@ -7915,9 +7819,6 @@ index 0000000000..7bd3342452
+ +MODULE_LICENSE("GPL v2");
+ +MODULE_DESCRIPTION("MTK Nand Flash Controller Driver");
+ +MODULE_AUTHOR("MediaTek");
+-diff --git a/drivers/mtd/nandx/include/Nandx.mk b/drivers/mtd/nandx/include/Nandx.mk
+-new file mode 100644
+-index 0000000000..667402790e
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/Nandx.mk
+ @@ -0,0 +1,16 @@
+@@ -7937,9 +7838,6 @@ index 0000000000..667402790e
+ +nandx-header-$(NANDX_LK_SUPPORT) += lk/nandx_os.h
+ +nandx-header-$(NANDX_KERNEL_SUPPORT) += kernel/nandx_os.h
+ +nandx-header-$(NANDX_UBOOT_SUPPORT) += uboot/nandx_os.h
+-diff --git a/drivers/mtd/nandx/include/internal/bbt.h b/drivers/mtd/nandx/include/internal/bbt.h
+-new file mode 100644
+-index 0000000000..4676def1f5
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/bbt.h
+ @@ -0,0 +1,62 @@
+@@ -8005,9 +7903,6 @@ index 0000000000..4676def1f5
+ +int bbt_is_bad(struct nandx_info *nand, off_t offset);
+ +
+ +#endif /*__BBT_H__*/
+-diff --git a/drivers/mtd/nandx/include/internal/nandx_core.h b/drivers/mtd/nandx/include/internal/nandx_core.h
+-new file mode 100644
+-index 0000000000..09aff72224
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/nandx_core.h
+ @@ -0,0 +1,250 @@
+@@ -8261,9 +8156,6 @@ index 0000000000..09aff72224
+ +#endif
+ +
+ +#endif /* __NANDX_CORE_H__ */
+-diff --git a/drivers/mtd/nandx/include/internal/nandx_errno.h b/drivers/mtd/nandx/include/internal/nandx_errno.h
+-new file mode 100644
+-index 0000000000..51fb299c03
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/nandx_errno.h
+ @@ -0,0 +1,40 @@
+@@ -8307,9 +8199,6 @@ index 0000000000..51fb299c03
+ +#endif
+ +
+ +#endif /* __NANDX_ERRNO_H__ */
+-diff --git a/drivers/mtd/nandx/include/internal/nandx_util.h b/drivers/mtd/nandx/include/internal/nandx_util.h
+-new file mode 100644
+-index 0000000000..1990b000ee
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/nandx_util.h
+ @@ -0,0 +1,221 @@
+@@ -8534,9 +8423,6 @@ index 0000000000..1990b000ee
+ +}
+ +
+ +#endif /* __NANDX_UTIL_H__ */
+-diff --git a/drivers/mtd/nandx/include/uboot/nandx_os.h b/drivers/mtd/nandx/include/uboot/nandx_os.h
+-new file mode 100644
+-index 0000000000..8ea53378bf
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/uboot/nandx_os.h
+ @@ -0,0 +1,78 @@
+@@ -8618,8 +8504,6 @@ index 0000000000..8ea53378bf
+ +}
+ +
+ +#endif /* __NANDX_OS_H__ */
+-diff --git a/include/configs/mt7622.h b/include/configs/mt7622.h
+-index dfd506ed24..6d0c956484 100644
+ --- a/include/configs/mt7622.h
+ +++ b/include/configs/mt7622.h
+ @@ -11,6 +11,31 @@
+@@ -8654,6 +8538,3 @@ index dfd506ed24..6d0c956484 100644
+  #define CONFIG_SYS_MAXARGS		8
+  #define CONFIG_SYS_BOOTM_LEN		SZ_64M
+  #define CONFIG_SYS_CBSIZE		SZ_1K
+--- 
+-2.17.1
+-
+diff --git a/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch b/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch
+index 2c021e1c80..7167a498ad 100644
+--- a/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch
++++ b/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch
+@@ -11,11 +11,9 @@ Signed-off-by: Xiangsheng Hou <xiangsheng.hou@mediatek.com>
+  arch/arm/dts/mt7622.dtsi    | 20 ++++++++++++++++++++
+  2 files changed, 26 insertions(+)
+ 
+-diff --git a/arch/arm/dts/mt7622-rfb.dts b/arch/arm/dts/mt7622-rfb.dts
+-index f05c3fe14d..05502bddec 100644
+ --- a/arch/arm/dts/mt7622-rfb.dts
+ +++ b/arch/arm/dts/mt7622-rfb.dts
+-@@ -143,6 +143,12 @@
++@@ -174,6 +174,12 @@
+  	};
+  };
+  
+@@ -28,11 +26,9 @@ index f05c3fe14d..05502bddec 100644
+  &uart0 {
+  	pinctrl-names = "default";
+  	pinctrl-0 = <&uart0_pins>;
+-diff --git a/arch/arm/dts/mt7622.dtsi b/arch/arm/dts/mt7622.dtsi
+-index 1e8ec9b48b..63fdb63d4a 100644
+ --- a/arch/arm/dts/mt7622.dtsi
+ +++ b/arch/arm/dts/mt7622.dtsi
+-@@ -52,6 +52,26 @@
++@@ -53,6 +53,26 @@
+  		#size-cells = <0>;
+  	};
+  
+@@ -59,6 +55,3 @@ index 1e8ec9b48b..63fdb63d4a 100644
+  	timer {
+  		compatible = "arm,armv8-timer";
+  		interrupt-parent = <&gic>;
+--- 
+-2.17.1
+-
+diff --git a/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch b/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch
+index cb564965c7..6999e5e235 100644
+--- a/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch
++++ b/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch
+@@ -10,8 +10,6 @@ Signed-off-by: Sam Shih <sam.shih@mediatek.com>
+  configs/mt7622_rfb_defconfig | 5 +++++
+  1 file changed, 5 insertions(+)
+ 
+-diff --git a/configs/mt7622_rfb_defconfig b/configs/mt7622_rfb_defconfig
+-index 1ce6ebdfeb..816126267b 100644
+ --- a/configs/mt7622_rfb_defconfig
+ +++ b/configs/mt7622_rfb_defconfig
+ @@ -13,6 +13,7 @@ CONFIG_DEFAULT_FDT_FILE="mt7622-rfb"
+@@ -22,18 +20,3 @@ index 1ce6ebdfeb..816126267b 100644
+  CONFIG_CMD_PCI=y
+  CONFIG_CMD_SF_TEST=y
+  CONFIG_CMD_PING=y
+- CONFIG_CMD_SMC=y
+-@@ -25,6 +26,10 @@ CONFIG_CLK=y
+- CONFIG_DM_MMC=y
+- CONFIG_MMC_HS200_SUPPORT=y
+- CONFIG_MMC_MTK=y
+-+CONFIG_MTD=y
+-+CONFIG_DM_MTD=y
+-+CONFIG_MTK_SPI_NAND=y
+-+CONFIG_MTD_RAW_NAND=y
+- CONFIG_DM_SPI_FLASH=y
+- CONFIG_SPI_FLASH_EON=y
+- CONFIG_SPI_FLASH_GIGADEVICE=y
+--- 
+-2.17.1
+-
+diff --git a/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch b/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch
+index cc7ed89280..b750dda6e8 100644
+--- a/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch
++++ b/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch
+@@ -1,10 +1,9 @@
+-diff --git a/configs/mt7623n_bpir2_defconfig b/configs/mt7623n_bpir2_defconfig
+-index 6b9fbd7e22..fb2a004803 100644
+ --- a/configs/mt7623n_bpir2_defconfig
+ +++ b/configs/mt7623n_bpir2_defconfig
+-@@ -52,3 +52,13 @@ CONFIG_TIMER=y
+- CONFIG_WDT_MTK=y
+- CONFIG_LZMA=y
++@@ -51,5 +51,15 @@ CONFIG_SYSRESET=y
++ CONFIG_SYSRESET_WATCHDOG=y
++ CONFIG_TIMER=y
++ CONFIG_MTK_TIMER=y
+ +CONFIG_CMD_BOOTZ=y
+ +CONFIG_OF_LIBFDT_OVERLAY=y
+ +#enables savenenv-command
+@@ -15,3 +14,5 @@ index 6b9fbd7e22..fb2a004803 100644
+ +CONFIG_CMD_ASKENV=y
+ +CONFIG_ENV_SIZE=0x2000
+ +CONFIG_CMD_SETEXPR=y
++ CONFIG_WDT_MTK=y
++ CONFIG_LZMA=y
+diff --git a/package/boot/uboot-mediatek/patches/010-no-binman.patch b/package/boot/uboot-mediatek/patches/010-no-binman.patch
+index a2680e56fd..7071a6c410 100644
+--- a/package/boot/uboot-mediatek/patches/010-no-binman.patch
++++ b/package/boot/uboot-mediatek/patches/010-no-binman.patch
+@@ -1,6 +1,6 @@
+---- a/Makefile	2020-10-13 13:39:06.471438591 +0800
+-+++ b/Makefile	2020-10-13 13:39:39.190798462 +0800
+-@@ -1725,6 +1725,10 @@
++--- a/Makefile
+++++ b/Makefile
++@@ -1716,6 +1716,10 @@ u-boot-elf.lds: arch/u-boot-elf.lds prep
+  
+  ifeq ($(CONFIG_SPL),y)
+  spl/u-boot-spl-mtk.bin: spl/u-boot-spl
+diff --git a/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch b/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch
+index ec189f82dc..37d1b6a671 100644
+--- a/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch
++++ b/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch
+@@ -1,5 +1,3 @@
+-diff --git a/configs/mt7623n_bpir2_defconfig b/configs/mt7623n_bpir2_defconfig
+-index 6b9fbd7e22..fb2a004803 100644
+ --- a/configs/mt7623a_unielec_u7623_02_defconfig
+ +++ b/configs/mt7623a_unielec_u7623_02_defconfig
+ @@ -52,3 +52,12 @@ CONFIG_TIMER=y
+diff --git a/target/linux/mediatek/Makefile b/target/linux/mediatek/Makefile
+index c8ab5e01e6..0eacee0afb 100644
+--- a/target/linux/mediatek/Makefile
++++ b/target/linux/mediatek/Makefile
+@@ -6,10 +6,9 @@ ARCH:=arm
+ BOARD:=mediatek
+ BOARDNAME:=MediaTek Ralink ARM
+ SUBTARGETS:=mt7622 mt7623 mt7629
+-FEATURES:=squashfs nand ramdisk fpu
++FEATURES:=dt-overlay emmc fpu gpio nand pci pcie rootfs-part separate_ramdisk squashfs usb
+ 
+ KERNEL_PATCHVER:=5.4
+-KERNEL_TESTING_PATCHVER:=5.4
+ 
+ include $(INCLUDE_DIR)/target.mk
+ DEFAULT_PACKAGES += \
+diff --git a/target/linux/mediatek/image/Makefile b/target/linux/mediatek/image/Makefile
+index 45e83cece5..5d37b14932 100644
+--- a/target/linux/mediatek/image/Makefile
++++ b/target/linux/mediatek/image/Makefile
+@@ -6,16 +6,6 @@
+ include $(TOPDIR)/rules.mk
+ include $(INCLUDE_DIR)/image.mk
+ 
+-define Build/sysupgrade-emmc
+-	rm -f $@.recovery
+-	mkfs.fat -C $@.recovery 3070
+-
+-	./gen_$(SUBTARGET)_emmc_img.sh $@ \
+-		$(IMAGE_KERNEL) \
+-		$@.recovery \
+-		$(IMAGE_ROOTFS)
+-endef
+-
+ # default all platform image(fit) build 
+ define Device/Default
+   PROFILES = Default $$(DEVICE_NAME)
+@@ -23,7 +13,7 @@ define Device/Default
+   KERNEL = kernel-bin | lzma | \
+ 	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb
+   KERNEL_INITRAMFS = kernel-bin | lzma | \
+-	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb
++	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb with-initrd
+   FILESYSTEMS := squashfs
+   DEVICE_DTS_DIR := $(DTS_DIR)
+   IMAGES := sysupgrade.bin
+@@ -37,5 +27,4 @@ define Image/Build
+ 	$(call Image/Build/$(1),$(1))
+ endef
+ 
+-$(eval $(call BuildImage))
+-
++$(eval $(call BuildImage))
+\ No newline at end of file
+diff --git a/target/linux/mediatek/image/mt7622.mk b/target/linux/mediatek/image/mt7622.mk
+index bf706930e4..22f6f79b11 100644
+--- a/target/linux/mediatek/image/mt7622.mk
++++ b/target/linux/mediatek/image/mt7622.mk
+@@ -1,26 +1,56 @@
+ KERNEL_LOADADDR := 0x44080000
+ 
+-define Device/bpi_bananapi-r64
+-  DEVICE_VENDOR := Bpi
+-  DEVICE_MODEL := Banana Pi R64
+-  DEVICE_DTS := mt7622-bananapi-bpi-r64
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+-  SUPPORTED_DEVICES := bananapi,bpi-r64
+-  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
++define Build/mmc-header
++	dd if=$(STAGING_DIR_IMAGE)/mt7622-header_$1.bin bs=512 count=1 of=$@ conv=notrunc
+ endef
+-TARGET_DEVICES += bpi_bananapi-r64
+ 
+-define Device/bpi_bananapi-r64-rootdisk
+-  DEVICE_VENDOR := Bpi
+-  DEVICE_MODEL := Banana Pi R64 (rootdisk)
+-  DEVICE_DTS := mt7622-bananapi-bpi-r64-rootdisk
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+-  SUPPORTED_DEVICES := bananapi,bpi-r64
+-  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
+-  IMAGES := sysupgrade-emmc.bin.gz
+-  IMAGE/sysupgrade-emmc.bin.gz := sysupgrade-emmc | gzip | append-metadata
++define Build/bl2
++	cat $(STAGING_DIR_IMAGE)/mt7622-$1-bl2.img >> $@
++endef
++
++define Build/bl31-uboot
++	cat $(STAGING_DIR_IMAGE)/mt7622_$1-u-boot.fip >> $@
++endef
++
++define Build/mt7622-gpt
++	ptgen -g -o $@ -h 4 -s 31 -a 1 -l 1024 -g \
++		-t 0xef \
++		$(if $(findstring sdmmc,$1), \
++			-N bl2		-r	-p 512k@512k \
++		) \
++			-N fip		-r	-p 1M@2M \
++			-N ubootenv	-r	-p 1M@4M \
++			-N recovery	-r	-p 32M@6M \
++		$(if $(findstring sdmmc,$1), \
++			-t 0x2e -N production	-p 216M@40M \
++		) \
++		$(if $(findstring emmc,$1), \
++			-t 0x2e -N production	-p 980M@40M \
++		)
++endef
++
++define Device/bananapi_bpi-r64
++  DEVICE_VENDOR := Bananapi
++  DEVICE_MODEL := BPi-R64
++  DEVICE_DTS := mt7622-bananapi-bpi-r64
++  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk \
++		     kmod-mt7615e kmod-mt7615-firmware \
++		     uboot-mt7622_bananapi_bpi-r64-emmc \
++		     uboot-mt7622_bananapi_bpi-r64-sdmmc \
++		     e2fsprogs mkf2fs f2fsck \
++		     kmod-nls-cp437 kmod-nls-iso8859-1 kmod-vfat blockd
++  ARTIFACTS := header-emmc.bin sdcard.img
++  IMAGES := sysupgrade.itb
++  KERNEL_INITRAMFS_SUFFIX := -recovery.itb
++  ARTIFACT/header-emmc.bin	:= mt7622-gpt  emmc | mmc-header  emmc
++  ARTIFACT/sdcard.img		:= mt7622-gpt sdmmc | mmc-header sdmmc | pad-to 128k | append-image header-emmc.bin | pad-to 256k |\
++				   bl2 emmc-2ddr | pad-to 512k | bl2 sdmmc-2ddr | pad-to 1M | bl31-uboot bananapi_bpi-r64-emmc | pad-to 2M |\
++				   bl31-uboot bananapi_bpi-r64-sdmmc | pad-to 6M
++  KERNEL			:= kernel-bin | gzip
++  KERNEL_INITRAMFS		:= kernel-bin | lzma | fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb with-initrd | pad-to 128k
++  IMAGE/sysupgrade.itb		:= append-kernel | fit gzip $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb external-static-with-rootfs | append-metadata
+ endef
+-TARGET_DEVICES += bpi_bananapi-r64-rootdisk
++TARGET_DEVICES += bananapi_bpi-r64
+ 
+ define Device/elecom_wrc-2533gent
+   DEVICE_VENDOR := Elecom
+diff --git a/target/linux/mediatek/mt7622/target.mk b/target/linux/mediatek/mt7622/target.mk
+index cb5a6b48cd..f880d859c4 100644
+--- a/target/linux/mediatek/mt7622/target.mk
++++ b/target/linux/mediatek/mt7622/target.mk
+@@ -2,9 +2,9 @@ ARCH:=aarch64
+ SUBTARGET:=mt7622
+ BOARDNAME:=MT7622
+ CPU_TYPE:=cortex-a53
+-DEFAULT_PACKAGES += kmod-mt7615e kmod-mt7615-firmware wpad-basic-wolfssl
++DEFAULT_PACKAGES += kmod-mt7615e kmod-mt7615-firmware wpad-basic-wolfssl uboot-envtools
+ KERNELNAME:=Image dtbs
+ 
+ define Target/Description
+ 	Build firmware images for MediaTek MT7622 ARM based boards.
+-endef
++endef
+\ No newline at end of file

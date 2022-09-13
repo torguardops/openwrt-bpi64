@@ -4,7 +4,7 @@
 OPENWRT_VERSION='21.02.3'
 
 # Dont change this on dot changes, such as .2 to .3
-# OPENWRT_PACKAGES_BRANCH='openwrt-21.02'
+OPENWRT_PACKAGES_BRANCH='openwrt-21.02'
 
 # These are your packages you want in the build
 PACKAGES="firewall iptables docker docker-compose dockerd luci-app-dockerman luci-lib-docker \
@@ -47,18 +47,15 @@ say() {
 say "Cloning openwrt"
 git clone -b "v${OPENWRT_VERSION}" https://git.openwrt.org/openwrt/openwrt.git
 cd openwrt
-# git fetch -t
-# say "Checking out OpenWRT ${OPENWRT_VERSION}"
-# git checkout v${OPENWRT_VERSION}
 
+# Set our compile package feeds.conf
 say "Creating our own feeds.conf"
-wget -O feeds.conf https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/feeds.buildinfo
-# cat << EOF > feeds.conf
-# src-git-full packages https://git.openwrt.org/feed/packages.git;${OPENWRT_PACKAGES_BRANCH}
-# src-git-full luci https://git.openwrt.org/project/luci.git;${OPENWRT_PACKAGES_BRANCH}
-# src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
-# src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
-# EOF
+cat << EOF > feeds.conf
+src-git-full packages https://git.openwrt.org/feed/packages.git;${OPENWRT_PACKAGES_BRANCH}
+src-git-full luci https://git.openwrt.org/project/luci.git;${OPENWRT_PACKAGES_BRANCH}
+src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
+src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
+EOF
 
 # Run feed commands pre-build, do this before creating our .config as it did not work when ran after
 say "Updating and Installing Feeds"
@@ -77,35 +74,12 @@ fi
 # Copy in the custom files directory if it exists - this adds our scripts and files to openwrt
 [ -d "${BASEDIR}/files" ] && { say "Copying our custom files into openwrt folder"; cp -R "${BASEDIR}/files/" "${BASEDIR}/openwrt/"; } || { say "No files directory found"; exit 1; }
 
-# Get the feeds used to build this release
-# say "Fetching our feeds"
-# wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/feeds.buildinfo -O feeds.conf
-
 # Download our "base" .config from openwrt
-say "Fetching our .config"
-wget https://downloads.openwrt.org/releases/"${OPENWRT_VERSION}"/targets/mediatek/mt7622/config.buildinfo -O .config
-
-# Write out our custom flags to the existing .config
-# say "Set build to only be for our selected board"
-# cat << EOF >> .config
-# CONFIG_TARGET_ROOTFS_EXT4FS=y
-# CONFIG_TARGET_EXT4_RESERVED_PCT=0
-# CONFIG_TARGET_EXT4_BLOCKSIZE_4K=y
-# # CONFIG_TARGET_EXT4_BLOCKSIZE_2K is not set
-# # CONFIG_TARGET_EXT4_BLOCKSIZE_1K is not set
-# CONFIG_TARGET_EXT4_BLOCKSIZE=4096
-# CONFIG_TARGET_EXT4_JOURNAL=y
-# CONFIG_TARGET_ROOTFS_SQUASHFS=y
-# CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
-# CONFIG_TARGET_UBIFS_JOURNAL_SIZE=""
-# CONFIG_TARGET_IMAGES_GZIP=y
-# CONFIG_TARGET_KERNEL_PARTSIZE=128
-# CONFIG_TARGET_ROOTFS_PARTSIZE=8000
-# EOF
+say "Copy our custom config as .config"
+cp "${BASEDIR}/config" "${BASEDIR}/openwrt/.config"
 
 # Write the packages we want to install to the .config
-say "Fixing our our .config"
-
+say "Add our requested packages to the .config"
 for PACKAGE in ${PACKAGES}; do
     say "Adding ${PACKAGE} to .config"
     echo "CONFIG_PACKAGE_${PACKAGE}=y" >> .config
