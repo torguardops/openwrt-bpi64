@@ -90,5 +90,5 @@ say "Running make defconfig to generate .config"
 make defconfig
 
 # Build with full debug if local, otherwise normal build
-#[ "$(uname -n)" == "ops" ] && { say "Building OpenWRT Full Debug"; make -j$(nproc) V=s; } || { say "Building OpenWRT"; make -j$(nproc); }
-say "Building OpenWRT Full Debug"; make -j$(nproc) V=s;
+[ "$(uname -n)" == "ops" ] && { say "Building OpenWRT Full Debug"; make -j$(nproc) V=s; } || { say "Building OpenWRT"; make -j$(nproc); }
+
