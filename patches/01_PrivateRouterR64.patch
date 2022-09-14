@@ -1,39 +1,50 @@
-From b1f938905d4eaceccc54049370552a9c131856c1 Mon Sep 17 00:00:00 2001
+From 7d4b55e2d9f5ae10b994c361eb1920960ffc619e Mon Sep 17 00:00:00 2001
 From: TorGuard Ops <ops@torguard.net>
-Date: Wed, 14 Sep 2022 12:45:37 +0000
-Subject: [PATCH] BPI Compile Patch
+Date: Wed, 14 Sep 2022 17:08:30 +0000
+Subject: [PATCH] R64 Compile Fix
 
 ---
  include/image-commands.mk                     |   4 +
- package/boot/uboot-mediatek/Makefile          |  66 ++-
- .../002-nand-add-spi-nand-driver.patch        | 123 +----
+ package/base-files/files/lib/upgrade/nand.sh  | 254 +++++---
+ package/boot/uboot-mediatek/Makefile          |  66 +-
+ .../002-nand-add-spi-nand-driver.patch        | 123 +---
  ...boot-add-dts-and-config-for-spi-nand.patch |  11 +-
  ...le-mtd-and-mtk_spi_nand-in-defconfig.patch |  17 -
  .../patches/005-update-bpir2-defconfig.patch  |  11 +-
  .../006-cmd-button-return-button-status.patch |  38 ++
- .../patches/007-env-readmem.patch             | 116 +++++
- .../patches/008-bootmenu-custom-title.patch   |  32 ++
+ .../patches/007-env-readmem.patch             | 116 ++++
+ .../patches/008-bootmenu-custom-title.patch   |  32 +
  ...7622-generic-reset-button-ignore-env.patch |  35 ++
  .../patches/010-no-binman.patch               |   6 +-
  .../patches/010-update-u7623-defconfig.patch  |   2 -
- ...-update-bananapi-bpi-r64-device-tree.patch |  95 ++++
- .../patches/016-fit-totalsize.patch           | 132 ++++++
- .../017-add-bananapi_bpi-r64_defconfigs.patch | 355 ++++++++++++++
- .../patches/020-add-linksys-e8450.patch       | 436 ++++++++++++++++++
+ ...-update-bananapi-bpi-r64-device-tree.patch |  95 +++
+ .../patches/016-fit-totalsize.patch           | 132 ++++
+ .../017-add-bananapi_bpi-r64_defconfigs.patch | 355 +++++++++++
+ .../patches/020-add-linksys-e8450.patch       | 436 +++++++++++++
  .../100-increase-CONFIG_SYS_BOOTM_LEN.patch   |  11 +
- scripts/mkits.sh                              | 141 +++++-
  target/linux/mediatek/Makefile                |   3 +-
+ .../mt7622-elecom-wrc-2533gent.dts            |   2 +-
+ .../dts/mediatek => dts}/mt7622-rfb1-ubi.dts  |   2 +-
+ .../mt7622-ubnt-unifi-6-lr.dts                |   2 +-
+ .../mt7622-bananapi-bpi-r64-rootdisk.dts      | 591 ------------------
+ target/linux/mediatek/image/Config.in         |   4 -
  target/linux/mediatek/image/Makefile          |  15 +-
- target/linux/mediatek/image/mt7622.mk         |  65 ++-
- target/linux/mediatek/mt7622/config-5.4       | 160 +------
+ .../mediatek/image/gen_mt7622_emmc_img.sh     |  19 -
+ .../mediatek/image/gen_mt7623_emmc_img.sh     |  30 -
+ .../linux/mediatek/image/gen_mtk_mmc_img.sh   | 147 -----
+ .../linux/mediatek/image/gen_scatterfile.sh   |   2 +-
+ target/linux/mediatek/image/mt7622.mk         |  75 ++-
+ .../mt7622/base-files/etc/board.d/02_network  |   3 +-
+ .../mt7622/base-files/lib/upgrade/platform.sh |  75 ++-
+ target/linux/mediatek/mt7622/config-5.4       | 159 +----
  target/linux/mediatek/mt7622/target.mk        |   4 +-
  tools/firmware-utils/Makefile                 |   2 +-
- tools/firmware-utils/src/bcm4908img.c         | 379 +++++++++++++++
+ tools/firmware-utils/src/bcm4908img.c         | 379 +++++++++++
  tools/firmware-utils/src/bcm4908kernel.c      |  16 +-
- tools/firmware-utils/src/ptgen.c              |  81 +++-
- tools/firmware-utils/src/tplink-safeloader.c  | 114 ++---
- tools/firmware-utils/src/zytrx.c              | 228 ---------
- 29 files changed, 2002 insertions(+), 696 deletions(-)
+ tools/firmware-utils/src/ptgen.c              |  81 ++-
+ tools/firmware-utils/src/tplink-safeloader.c  | 114 +---
+ tools/firmware-utils/src/zytrx.c              | 228 -------
+ 40 files changed, 2097 insertions(+), 1600 deletions(-)
  create mode 100644 package/boot/uboot-mediatek/patches/006-cmd-button-return-button-status.patch
  create mode 100644 package/boot/uboot-mediatek/patches/007-env-readmem.patch
  create mode 100644 package/boot/uboot-mediatek/patches/008-bootmenu-custom-title.patch
@@ -43,6 +54,14 @@ Subject: [PATCH] BPI Compile Patch
  create mode 100644 package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch
  create mode 100644 package/boot/uboot-mediatek/patches/020-add-linksys-e8450.patch
  create mode 100644 package/boot/uboot-mediatek/patches/100-increase-CONFIG_SYS_BOOTM_LEN.patch
+ rename target/linux/mediatek/{files-5.4/arch/arm64/boot/dts/mediatek => dts}/mt7622-elecom-wrc-2533gent.dts (99%)
+ rename target/linux/mediatek/{files-5.4/arch/arm64/boot/dts/mediatek => dts}/mt7622-rfb1-ubi.dts (99%)
+ rename target/linux/mediatek/{files-5.4/arch/arm64/boot/dts/mediatek => dts}/mt7622-ubnt-unifi-6-lr.dts (99%)
+ delete mode 100644 target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-bananapi-bpi-r64-rootdisk.dts
+ delete mode 100644 target/linux/mediatek/image/Config.in
+ delete mode 100755 target/linux/mediatek/image/gen_mt7622_emmc_img.sh
+ delete mode 100755 target/linux/mediatek/image/gen_mt7623_emmc_img.sh
+ delete mode 100755 target/linux/mediatek/image/gen_mtk_mmc_img.sh
  create mode 100644 tools/firmware-utils/src/bcm4908img.c
  delete mode 100644 tools/firmware-utils/src/zytrx.c
 
@@ -61,6 +80,385 @@ index 4d54a14ba4..b050b9dad3 100644
  compat_version=$(if $(DEVICE_COMPAT_VERSION),$(DEVICE_COMPAT_VERSION),1.0)
  json_quote=$(subst ','\'',$(subst ",\",$(1)))
  #")')
+diff --git a/package/base-files/files/lib/upgrade/nand.sh b/package/base-files/files/lib/upgrade/nand.sh
+index e6f58df4f5..3f76372d8d 100644
+--- a/package/base-files/files/lib/upgrade/nand.sh
++++ b/package/base-files/files/lib/upgrade/nand.sh
+@@ -3,13 +3,13 @@
+ 
+ . /lib/functions.sh
+ 
+-# 'kernel' partition on NAND contains the kernel
++# 'kernel' partition or UBI volume on NAND contains the kernel
+ CI_KERNPART="${CI_KERNPART:-kernel}"
+ 
+ # 'ubi' partition on NAND contains UBI
+ CI_UBIPART="${CI_UBIPART:-ubi}"
+ 
+-# 'rootfs' partition on NAND contains the rootfs
++# 'rootfs' UBI volume on NAND contains the rootfs
+ CI_ROOTPART="${CI_ROOTPART:-rootfs}"
+ 
+ ubi_mknod() {
+@@ -97,29 +97,58 @@ identify_tar() {
+ }
+ 
+ nand_restore_config() {
+-	sync
+-	local ubidev=$( nand_find_ubi $CI_UBIPART )
++	local ubidev=$( nand_find_ubi "$CI_UBIPART" )
+ 	local ubivol="$( nand_find_volume $ubidev rootfs_data )"
+-	[ ! "$ubivol" ] &&
+-		ubivol="$( nand_find_volume $ubidev $CI_ROOTPART )"
++	if [ ! "$ubivol" ]; then
++		ubivol="$( nand_find_volume $ubidev "$CI_ROOTPART" )"
++		if [ ! "$ubivol" ]; then
++			echo "cannot find ubifs data volume"
++			return 1
++		fi
++	fi
+ 	mkdir /tmp/new_root
+ 	if ! mount -t ubifs /dev/$ubivol /tmp/new_root; then
+-		echo "mounting ubifs $ubivol failed"
++		echo "cannot mount ubifs volume $ubivol"
+ 		rmdir /tmp/new_root
+ 		return 1
+ 	fi
+-	mv "$1" "/tmp/new_root/$BACKUP_FILE"
+-	umount /tmp/new_root
+-	sync
++	if mv "$1" "/tmp/new_root/$BACKUP_FILE"; then
++		if umount /tmp/new_root; then
++			echo "configuration saved"
++			rmdir /tmp/new_root
++			return 0
++		fi
++	else
++		umount /tmp/new_root
++	fi
++	echo "could not save configuration to ubifs volume $ubivol"
+ 	rmdir /tmp/new_root
++	return 1
++}
++
++nand_remove_ubiblock() {
++	local ubivol=$1
++	local ubiblk=ubiblock${ubivol:3}
++	if [ -e /dev/$ubiblk ]; then
++		echo "removing $ubiblk"
++		if ! ubiblock -r /dev/$ubivol; then
++			echo "cannot remove $ubiblk"
++			return 1
++		fi
++	fi
+ }
+ 
+ nand_upgrade_prepare_ubi() {
+ 	local rootfs_length="$1"
+ 	local rootfs_type="$2"
+-	local has_kernel="${3:-0}"
++	local rootfs_data_max="$(fw_printenv -n rootfs_data_max 2>/dev/null)"
++	[ -n "$rootfs_data_max" ] && rootfs_data_max=$((rootfs_data_max))
++
++	local kernel_length="$3"
+ 	local has_env="${4:-0}"
+ 
++	[ -n "$rootfs_length" -o -n "$kernel_length" ] || return 1
++
+ 	local mtdnum="$( find_mtd_index "$CI_UBIPART" )"
+ 	if [ ! "$mtdnum" ]; then
+ 		echo "cannot find ubi mtd partition $CI_UBIPART"
+@@ -129,77 +158,84 @@ nand_upgrade_prepare_ubi() {
+ 	local ubidev="$( nand_find_ubi "$CI_UBIPART" )"
+ 	if [ ! "$ubidev" ]; then
+ 		ubiattach -m "$mtdnum"
+-		sync
+ 		ubidev="$( nand_find_ubi "$CI_UBIPART" )"
+-	fi
+ 
+-	if [ ! "$ubidev" ]; then
+-		ubiformat /dev/mtd$mtdnum -y
+-		ubiattach -m "$mtdnum"
+-		sync
+-		ubidev="$( nand_find_ubi "$CI_UBIPART" )"
+-		[ "$has_env" -gt 0 ] && {
+-			ubimkvol /dev/$ubidev -n 0 -N ubootenv -s 1MiB
+-			ubimkvol /dev/$ubidev -n 1 -N ubootenv2 -s 1MiB
+-		}
+-	fi
++		if [ ! "$ubidev" ]; then
++			ubiformat /dev/mtd$mtdnum -y
++			ubiattach -m "$mtdnum"
++			ubidev="$( nand_find_ubi "$CI_UBIPART" )"
+ 
+-	local kern_ubivol="$( nand_find_volume $ubidev $CI_KERNPART )"
+-	local root_ubivol="$( nand_find_volume $ubidev $CI_ROOTPART )"
+-	local data_ubivol="$( nand_find_volume $ubidev rootfs_data )"
++			if [ ! "$ubidev" ]; then
++				echo "cannot attach ubi mtd partition $CI_UBIPART"
++				return 1
++			fi
+ 
+-	# remove ubiblock device of rootfs
+-	local root_ubiblk="ubiblock${root_ubivol:3}"
+-	if [ "$root_ubivol" -a -e "/dev/$root_ubiblk" ]; then
+-		echo "removing $root_ubiblk"
+-		if ! ubiblock -r /dev/$root_ubivol; then
+-			echo "cannot remove $root_ubiblk"
+-			return 1;
++			if [ "$has_env" -gt 0 ]; then
++				ubimkvol /dev/$ubidev -n 0 -N ubootenv -s 1MiB
++				ubimkvol /dev/$ubidev -n 1 -N ubootenv2 -s 1MiB
++			fi
+ 		fi
+ 	fi
+ 
++	local kern_ubivol="$( nand_find_volume $ubidev "$CI_KERNPART" )"
++	local root_ubivol="$( nand_find_volume $ubidev "$CI_ROOTPART" )"
++	local data_ubivol="$( nand_find_volume $ubidev rootfs_data )"
++	[ "$root_ubivol" = "$kern_ubivol" ] && root_ubivol=
++
++	# remove ubiblocks
++	[ "$kern_ubivol" ] && { nand_remove_ubiblock $kern_ubivol || return 1; }
++	[ "$root_ubivol" ] && { nand_remove_ubiblock $root_ubivol || return 1; }
++	[ "$data_ubivol" ] && { nand_remove_ubiblock $data_ubivol || return 1; }
++
+ 	# kill volumes
+-	[ "$kern_ubivol" ] && ubirmvol /dev/$ubidev -N $CI_KERNPART || true
+-	[ "$root_ubivol" ] && ubirmvol /dev/$ubidev -N $CI_ROOTPART || true
+-	[ "$data_ubivol" ] && ubirmvol /dev/$ubidev -N rootfs_data || true
++	[ "$kern_ubivol" ] && ubirmvol /dev/$ubidev -N "$CI_KERNPART" || :
++	[ "$root_ubivol" ] && ubirmvol /dev/$ubidev -N "$CI_ROOTPART" || :
++	[ "$data_ubivol" ] && ubirmvol /dev/$ubidev -N rootfs_data || :
+ 
+-	# update kernel
+-	if [ "$has_kernel" = "1" ]; then
+-		if ! ubimkvol /dev/$ubidev -N $CI_KERNPART -s $kernel_length; then
++	# create kernel vol
++	if [ -n "$kernel_length" ]; then
++		if ! ubimkvol /dev/$ubidev -N "$CI_KERNPART" -s $kernel_length; then
+ 			echo "cannot create kernel volume"
+ 			return 1;
+ 		fi
+ 	fi
+ 
+-	# update rootfs
+-	local root_size_param
+-	if [ "$rootfs_type" = "ubifs" ]; then
+-		root_size_param="-m"
+-	else
+-		root_size_param="-s $rootfs_length"
+-	fi
+-	if ! ubimkvol /dev/$ubidev -N $CI_ROOTPART $root_size_param; then
+-		echo "cannot create rootfs volume"
+-		return 1;
++	# create rootfs vol
++	if [ -n "$rootfs_length" ]; then
++		local rootfs_size_param
++		if [ "$rootfs_type" = "ubifs" ]; then
++			rootfs_size_param="-m"
++		else
++			rootfs_size_param="-s $rootfs_length"
++		fi
++		if ! ubimkvol /dev/$ubidev -N "$CI_ROOTPART" $rootfs_size_param; then
++			echo "cannot create rootfs volume"
++			return 1;
++		fi
+ 	fi
+ 
+-	# create rootfs_data for non-ubifs rootfs
++	# create rootfs_data vol for non-ubifs rootfs
+ 	if [ "$rootfs_type" != "ubifs" ]; then
+-		if ! ubimkvol /dev/$ubidev -N rootfs_data -m; then
+-			echo "cannot initialize rootfs_data volume"
+-			return 1
++		local rootfs_data_size_param="-m"
++		if [ -n "$rootfs_data_max" ]; then
++			rootfs_data_size_param="-s $rootfs_data_max"
++		fi
++		if ! ubimkvol /dev/$ubidev -N rootfs_data $rootfs_data_size_param; then
++			if ! ubimkvol /dev/$ubidev -N rootfs_data -m; then
++				echo "cannot initialize rootfs_data volume"
++				return 1
++			fi
+ 		fi
+ 	fi
+-	sync
++
+ 	return 0
+ }
+ 
+ nand_do_upgrade_success() {
+ 	local conf_tar="/tmp/sysupgrade.tgz"
+-
+-	sync
+-	[ -f "$conf_tar" ] && nand_restore_config "$conf_tar"
+-	echo "sysupgrade successful"
++	if { [ ! -f "$conf_tar" ] || nand_restore_config "$conf_tar"; } && sync; then
++		echo "sysupgrade successful"
++	fi
+ 	umount -a
+ 	reboot -f
+ }
+@@ -209,11 +245,6 @@ nand_upgrade_ubinized() {
+ 	local ubi_file="$1"
+ 	local mtdnum="$(find_mtd_index "$CI_UBIPART")"
+ 
+-	[ ! "$mtdnum" ] && {
+-		CI_UBIPART="rootfs"
+-		mtdnum="$(find_mtd_index "$CI_UBIPART")"
+-	}
+-
+ 	if [ ! "$mtdnum" ]; then
+ 		echo "cannot find mtd device $CI_UBIPART"
+ 		umount -a
+@@ -221,10 +252,10 @@ nand_upgrade_ubinized() {
+ 	fi
+ 
+ 	local mtddev="/dev/mtd${mtdnum}"
+-	ubidetach -p "${mtddev}" || true
+-	sync
++	ubidetach -p "${mtddev}" || :
+ 	ubiformat "${mtddev}" -y -f "${ubi_file}"
+ 	ubiattach -p "${mtddev}"
++
+ 	nand_do_upgrade_success
+ }
+ 
+@@ -232,61 +263,88 @@ nand_upgrade_ubinized() {
+ nand_upgrade_ubifs() {
+ 	local rootfs_length=$( (cat $1 | wc -c) 2> /dev/null)
+ 
+-	nand_upgrade_prepare_ubi "$rootfs_length" "ubifs" "0" "0"
++	nand_upgrade_prepare_ubi "$rootfs_length" "ubifs" "" ""
+ 
+ 	local ubidev="$( nand_find_ubi "$CI_UBIPART" )"
+-	local root_ubivol="$(nand_find_volume $ubidev $CI_ROOTPART)"
++	local root_ubivol="$(nand_find_volume $ubidev "$CI_ROOTPART")"
+ 	ubiupdatevol /dev/$root_ubivol -s $rootfs_length $1
+ 
+ 	nand_do_upgrade_success
+ }
+ 
+-nand_upgrade_tar() {
+-	local tar_file="$1"
+-	local kernel_mtd="$(find_mtd_index $CI_KERNPART)"
++nand_upgrade_fit() {
++	local fit_file="$1"
++	local fit_length="$(wc -c < "$fit_file")"
+ 
+-	local board_dir=$(tar tf $tar_file | grep -m 1 '^sysupgrade-.*/$')
+-	board_dir=${board_dir%/}
++	nand_upgrade_prepare_ubi "" "" "$fit_length" "1"
+ 
+-	local kernel_length=$( (tar xf $tar_file ${board_dir}/kernel -O | wc -c) 2> /dev/null)
+-	local rootfs_length=$( (tar xf $tar_file ${board_dir}/root -O | wc -c) 2> /dev/null)
++	local fit_ubidev="$(nand_find_ubi "$CI_UBIPART")"
++	local fit_ubivol="$(nand_find_volume $fit_ubidev "$CI_KERNPART")"
++	ubiupdatevol /dev/$fit_ubivol -s $fit_length $fit_file
+ 
+-	local rootfs_type="$(identify_tar "$tar_file" ${board_dir}/root)"
++	nand_do_upgrade_success
++}
+ 
+-	local has_kernel=1
+-	local has_env=0
++nand_upgrade_tar() {
++	local tar_file="$1"
+ 
+-	[ "$kernel_length" != 0 -a -n "$kernel_mtd" ] && {
+-		tar xf $tar_file ${board_dir}/kernel -O | mtd write - $CI_KERNPART
+-	}
+-	[ "$kernel_length" = 0 -o ! -z "$kernel_mtd" ] && has_kernel=0
++	local board_dir="$(tar tf "$tar_file" | grep -m 1 '^sysupgrade-.*/$')"
++	board_dir="${board_dir%/}"
+ 
+-	nand_upgrade_prepare_ubi "$rootfs_length" "$rootfs_type" "$has_kernel" "$has_env"
++	local kernel_mtd kernel_length
++	if [ "$CI_KERNPART" != "none" ]; then
++		kernel_mtd="$(find_mtd_index "$CI_KERNPART")"
++		kernel_length=$( (tar xf "$tar_file" "$board_dir/kernel" -O | wc -c) 2> /dev/null)
++		[ "$kernel_length" = 0 ] && kernel_length=
++	fi
++	local rootfs_length=$( (tar xf "$tar_file" "$board_dir/root" -O | wc -c) 2> /dev/null)
++	[ "$rootfs_length" = 0 ] && rootfs_length=
++	local rootfs_type
++	[ "$rootfs_length" ] && rootfs_type="$(identify_tar "$tar_file" "$board_dir/root")"
++
++	local ubi_kernel_length
++	if [ "$kernel_length" ]; then
++		if [ "$kernel_mtd" ]; then
++			mtd erase "$CI_KERNPART"
++		else
++			ubi_kernel_length="$kernel_length"
++		fi
++	fi
++	local has_env=0
++	nand_upgrade_prepare_ubi "$rootfs_length" "$rootfs_type" "$ubi_kernel_length" "$has_env"
+ 
+ 	local ubidev="$( nand_find_ubi "$CI_UBIPART" )"
+-	[ "$has_kernel" = "1" ] && {
+-		local kern_ubivol="$(nand_find_volume $ubidev $CI_KERNPART)"
+-		tar xf $tar_file ${board_dir}/kernel -O | \
+-			ubiupdatevol /dev/$kern_ubivol -s $kernel_length -
+-	}
+-
+-	local root_ubivol="$(nand_find_volume $ubidev $CI_ROOTPART)"
+-	tar xf $tar_file ${board_dir}/root -O | \
+-		ubiupdatevol /dev/$root_ubivol -s $rootfs_length -
++	if [ "$rootfs_length" ]; then
++		local root_ubivol="$( nand_find_volume $ubidev "$CI_ROOTPART" )"
++		tar xf "$tar_file" "$board_dir/root" -O | \
++			ubiupdatevol /dev/$root_ubivol -s $rootfs_length -
++	fi
++	if [ "$kernel_length" ]; then
++		if [ "$kernel_mtd" ]; then
++			tar xf "$tar_file" "$board_dir/kernel" -O | \
++				mtd -n write - "$CI_KERNPART"
++		else
++			local kern_ubivol="$( nand_find_volume $ubidev "$CI_KERNPART" )"
++			tar xf "$tar_file" "$board_dir/kernel" -O | \
++				ubiupdatevol /dev/$kern_ubivol -s $kernel_length -
++		fi
++	fi
+ 
+ 	nand_do_upgrade_success
+ }
+ 
+ # Recognize type of passed file and start the upgrade process
+ nand_do_upgrade() {
+-	local file_type=$(identify $1)
++	local file_type=$(identify "$1")
+ 
+-	[ ! "$(find_mtd_index "$CI_UBIPART")" ] && CI_UBIPART="rootfs"
++	[ ! "$(find_mtd_index "$CI_UBIPART")" ] && CI_UBIPART=rootfs
+ 
++	sync
+ 	case "$file_type" in
+-		"ubi")		nand_upgrade_ubinized $1;;
+-		"ubifs")	nand_upgrade_ubifs $1;;
+-		*)		nand_upgrade_tar $1;;
++		"fit")		nand_upgrade_fit "$1";;
++		"ubi")		nand_upgrade_ubinized "$1";;
++		"ubifs")	nand_upgrade_ubifs "$1";;
++		*)		nand_upgrade_tar "$1";;
+ 	esac
+ }
+ 
+@@ -309,10 +367,10 @@ nand_do_platform_check() {
+ 	local control_length=$( (tar xf $tar_file sysupgrade-$board_name/CONTROL -O | wc -c) 2> /dev/null)
+ 	local file_type="$(identify $2)"
+ 
+-	[ "$control_length" = 0 -a "$file_type" != "ubi" -a "$file_type" != "ubifs" ] && {
++	[ "$control_length" = 0 -a "$file_type" != "ubi" -a "$file_type" != "ubifs" -a "$file_type" != "fit" ] && {
+ 		echo "Invalid sysupgrade file."
+ 		return 1
+ 	}
+ 
+ 	return 0
+-}
++}
+\ No newline at end of file
 diff --git a/package/boot/uboot-mediatek/Makefile b/package/boot/uboot-mediatek/Makefile
 index c46b906cb5..6904b39938 100644
 --- a/package/boot/uboot-mediatek/Makefile
@@ -1181,7 +1579,7 @@ index 0000000000..72fb4ac516
 + 
 diff --git a/package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch b/package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch
 new file mode 100644
-index 0000000000..6469845d12
+index 0000000000..838970cd64
 --- /dev/null
 +++ b/package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch
 @@ -0,0 +1,355 @@
@@ -1314,8 +1712,8 @@ index 0000000000..6469845d12
 +--- /dev/null
 ++++ b/bananapi_bpi-r64-sdmmc_env
 +@@ -0,0 +1,54 @@
-++ipaddr=192.168.0.45
-++serverip=192.168.0.100
+++ipaddr=192.168.1.1
+++serverip=192.168.1.254
 ++loadaddr=0x4007ff28
 ++bootcmd=run boot_sdmmc
 ++bootargs=earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk1p6
@@ -1497,8 +1895,8 @@ index 0000000000..6469845d12
 +--- /dev/null
 ++++ b/bananapi_bpi-r64-emmc_env
 +@@ -0,0 +1,43 @@
-++ipaddr=192.168.0.45
-++serverip=192.168.0.100
+++ipaddr=192.168.1.1
+++serverip=192.168.1.254
 ++loadaddr=0x4007ff28
 ++bootcmd=run boot_emmc
 ++bootargs=earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk0p5
@@ -1999,228 +2397,6 @@ index 0000000000..811e8489dd
 + #define CONFIG_SYS_CBSIZE		SZ_1K
 + #define CONFIG_SYS_PBSIZE		(CONFIG_SYS_CBSIZE +	\
 + 					sizeof(CONFIG_SYS_PROMPT) + 16)
-diff --git a/scripts/mkits.sh b/scripts/mkits.sh
-index bb629d6fca..d37c8a6669 100755
---- a/scripts/mkits.sh
-+++ b/scripts/mkits.sh
-@@ -23,18 +23,32 @@ usage() {
- 	printf "\n\t-c ==> set config name 'config'"
- 	printf "\n\t-a ==> set load address to 'addr' (hex)"
- 	printf "\n\t-e ==> set entry point to 'entry' (hex)"
-+	printf "\n\t-f ==> set device tree compatible string"
-+	printf "\n\t-i ==> include initrd Blob 'initrd'"
- 	printf "\n\t-v ==> set kernel version to 'version'"
- 	printf "\n\t-k ==> include kernel image 'kernel'"
- 	printf "\n\t-D ==> human friendly Device Tree Blob 'name'"
- 	printf "\n\t-n ==> fdt unit-address 'address'"
- 	printf "\n\t-d ==> include Device Tree Blob 'dtb'"
--	printf "\n\t-o ==> create output file 'its_file'\n"
-+	printf "\n\t-r ==> include RootFS blob 'rootfs'"
-+	printf "\n\t-H ==> specify hash algo instead of SHA1"
-+	printf "\n\t-l ==> legacy mode character (@ etc otherwise -)"
-+	printf "\n\t-o ==> create output file 'its_file'"
-+	printf "\n\t-O ==> create config with dt overlay 'name:dtb'"
-+	printf "\n\t\t(can be specified more than once)\n"
- 	exit 1
- }
- 
-+REFERENCE_CHAR='-'
- FDTNUM=1
-+ROOTFSNUM=1
-+INITRDNUM=1
-+HASH=sha1
-+LOADABLES=
-+DTOVERLAY=
-+DTADDR=
- 
--while getopts ":A:a:c:C:D:d:e:k:n:o:v:" OPTION
-+while getopts ":A:a:c:C:D:d:e:f:i:k:l:n:o:O:v:r:H:" OPTION
- do
- 	case $OPTION in
- 		A ) ARCH=$OPTARG;;
-@@ -44,9 +58,15 @@ do
- 		D ) DEVICE=$OPTARG;;
- 		d ) DTB=$OPTARG;;
- 		e ) ENTRY_ADDR=$OPTARG;;
-+		f ) COMPATIBLE=$OPTARG;;
-+		i ) INITRD=$OPTARG;;
- 		k ) KERNEL=$OPTARG;;
-+		l ) REFERENCE_CHAR=$OPTARG;;
- 		n ) FDTNUM=$OPTARG;;
- 		o ) OUTPUT=$OPTARG;;
-+		O ) DTOVERLAY="$DTOVERLAY ${OPTARG}";;
-+		r ) ROOTFS=$OPTARG;;
-+		H ) HASH=$OPTARG;;
- 		v ) VERSION=$OPTARG;;
- 		* ) echo "Invalid option passed to '$0' (options:$*)"
- 		usage;;
-@@ -62,26 +82,120 @@ fi
- 
- ARCH_UPPER=$(echo "$ARCH" | tr '[:lower:]' '[:upper:]')
- 
-+if [ -n "${COMPATIBLE}" ]; then
-+	COMPATIBLE_PROP="compatible = \"${COMPATIBLE}\";"
-+fi
-+
-+[ "$DTOVERLAY" ] && {
-+	dtbsize=$(wc -c "$DTB" | cut -d' ' -f1)
-+	DTADDR=$(printf "0x%08x" $(($LOAD_ADDR - $dtbsize)) )
-+}
-+
- # Conditionally create fdt information
- if [ -n "${DTB}" ]; then
- 	FDT_NODE="
--		fdt@$FDTNUM {
-+		fdt${REFERENCE_CHAR}$FDTNUM {
- 			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} device tree blob\";
-+			${COMPATIBLE_PROP}
- 			data = /incbin/(\"${DTB}\");
- 			type = \"flat_dt\";
-+			${DTADDR:+load = <${DTADDR}>;}
-+			arch = \"${ARCH}\";
-+			compression = \"none\";
-+			hash@1 {
-+				algo = \"crc32\";
-+			};
-+			hash@2 {
-+				algo = \"${HASH}\";
-+			};
-+		};
-+"
-+	FDT_PROP="fdt = \"fdt${REFERENCE_CHAR}$FDTNUM\";"
-+fi
-+
-+if [ -n "${INITRD}" ]; then
-+	INITRD_NODE="
-+		initrd${REFERENCE_CHAR}$INITRDNUM {
-+			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} initrd\";
-+			${COMPATIBLE_PROP}
-+			data = /incbin/(\"${INITRD}\");
-+			type = \"ramdisk\";
-+			arch = \"${ARCH}\";
-+			os = \"linux\";
-+			hash@1 {
-+				algo = \"crc32\";
-+			};
-+			hash@2 {
-+				algo = \"${HASH}\";
-+			};
-+		};
-+"
-+	INITRD_PROP="ramdisk=\"initrd${REFERENCE_CHAR}${INITRDNUM}\";"
-+fi
-+
-+
-+if [ -n "${ROOTFS}" ]; then
-+	dd if="${ROOTFS}" of="${ROOTFS}.pagesync" bs=4096 conv=sync
-+	ROOTFS_NODE="
-+		rootfs${REFERENCE_CHAR}$ROOTFSNUM {
-+			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} rootfs\";
-+			${COMPATIBLE_PROP}
-+			data = /incbin/(\"${ROOTFS}.pagesync\");
-+			type = \"filesystem\";
- 			arch = \"${ARCH}\";
- 			compression = \"none\";
- 			hash@1 {
- 				algo = \"crc32\";
- 			};
- 			hash@2 {
--				algo = \"sha1\";
-+				algo = \"${HASH}\";
- 			};
- 		};
- "
--	FDT_PROP="fdt = \"fdt@$FDTNUM\";"
-+	LOADABLES="${LOADABLES:+$LOADABLES, }\"rootfs${REFERENCE_CHAR}${ROOTFSNUM}\""
- fi
- 
-+# add DT overlay blobs
-+FDTOVERLAY_NODE=""
-+OVCONFIGS=""
-+[ "$DTOVERLAY" ] && for overlay in $DTOVERLAY ; do
-+	overlay_blob=${overlay##*:}
-+	ovname=${overlay%%:*}
-+	ovnode="fdt-$ovname"
-+	ovsize=$(wc -c "$overlay_blob" | cut -d' ' -f1)
-+	echo "$ovname ($overlay_blob) : $ovsize" >&2
-+	DTADDR=$(printf "0x%08x" $(($DTADDR - $ovsize)))
-+	FDTOVERLAY_NODE="$FDTOVERLAY_NODE
-+
-+		$ovnode {
-+			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} device tree overlay $ovname\";
-+			${COMPATIBLE_PROP}
-+			data = /incbin/(\"${overlay_blob}\");
-+			type = \"flat_dt\";
-+			arch = \"${ARCH}\";
-+			load = <${DTADDR}>;
-+			compression = \"none\";
-+			hash@1 {
-+				algo = \"crc32\";
-+			};
-+			hash@2 {
-+				algo = \"${HASH}\";
-+			};
-+		};
-+"
-+	OVCONFIGS="$OVCONFIGS
-+
-+		config-$ovname {
-+			description = \"OpenWrt ${DEVICE} with $ovname\";
-+			kernel = \"kernel${REFERENCE_CHAR}1\";
-+			fdt = \"fdt${REFERENCE_CHAR}$FDTNUM\", \"$ovnode\";
-+			${LOADABLES:+loadables = ${LOADABLES};}
-+			${COMPATIBLE_PROP}
-+			${INITRD_PROP}
-+		};
-+	"
-+done
-+
- # Create a default, fully populated DTS file
- DATA="/dts-v1/;
- 
-@@ -90,7 +204,7 @@ DATA="/dts-v1/;
- 	#address-cells = <1>;
- 
- 	images {
--		kernel@1 {
-+		kernel${REFERENCE_CHAR}1 {
- 			description = \"${ARCH_UPPER} OpenWrt Linux-${VERSION}\";
- 			data = /incbin/(\"${KERNEL}\");
- 			type = \"kernel\";
-@@ -103,21 +217,28 @@ DATA="/dts-v1/;
- 				algo = \"crc32\";
- 			};
- 			hash@2 {
--				algo = \"sha1\";
-+				algo = \"$HASH\";
- 			};
- 		};
-+${INITRD_NODE}
- ${FDT_NODE}
-+${FDTOVERLAY_NODE}
-+${ROOTFS_NODE}
- 	};
- 
- 	configurations {
- 		default = \"${CONFIG}\";
- 		${CONFIG} {
--			description = \"OpenWrt\";
--			kernel = \"kernel@1\";
-+			description = \"OpenWrt ${DEVICE}\";
-+			kernel = \"kernel${REFERENCE_CHAR}1\";
- 			${FDT_PROP}
-+			${LOADABLES:+loadables = ${LOADABLES};}
-+			${COMPATIBLE_PROP}
-+			${INITRD_PROP}
- 		};
-+		${OVCONFIGS}
- 	};
- };"
- 
- # Write .its file to disk
--echo "$DATA" > "${OUTPUT}"
-+echo "$DATA" > "${OUTPUT}"
-\ No newline at end of file
 diff --git a/target/linux/mediatek/Makefile b/target/linux/mediatek/Makefile
 index c8ab5e01e6..0eacee0afb 100644
 --- a/target/linux/mediatek/Makefile
@@ -2237,6 +2413,655 @@ index c8ab5e01e6..0eacee0afb 100644
  
  include $(INCLUDE_DIR)/target.mk
  DEFAULT_PACKAGES += \
+diff --git a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-elecom-wrc-2533gent.dts b/target/linux/mediatek/dts/mt7622-elecom-wrc-2533gent.dts
+similarity index 99%
+rename from target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-elecom-wrc-2533gent.dts
+rename to target/linux/mediatek/dts/mt7622-elecom-wrc-2533gent.dts
+index 2ac1c6a671..91ccba18e7 100644
+--- a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-elecom-wrc-2533gent.dts
++++ b/target/linux/mediatek/dts/mt7622-elecom-wrc-2533gent.dts
+@@ -605,4 +605,4 @@
+ &wmac {
+ 	mediatek,mtd-eeprom = <&factory 0x0000>;
+ 	status = "okay";
+-};
++};
+\ No newline at end of file
+diff --git a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-rfb1-ubi.dts b/target/linux/mediatek/dts/mt7622-rfb1-ubi.dts
+similarity index 99%
+rename from target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-rfb1-ubi.dts
+rename to target/linux/mediatek/dts/mt7622-rfb1-ubi.dts
+index 8b58c1e12f..8a31ff3dbd 100644
+--- a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-rfb1-ubi.dts
++++ b/target/linux/mediatek/dts/mt7622-rfb1-ubi.dts
+@@ -641,4 +641,4 @@
+ &wmac {
+ 	mediatek,mtd-eeprom = <&factory 0x0000>;
+ 	status = "okay";
+-};
++};
+\ No newline at end of file
+diff --git a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-ubnt-unifi-6-lr.dts b/target/linux/mediatek/dts/mt7622-ubnt-unifi-6-lr.dts
+similarity index 99%
+rename from target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-ubnt-unifi-6-lr.dts
+rename to target/linux/mediatek/dts/mt7622-ubnt-unifi-6-lr.dts
+index 1f410b1d47..b92efd8eb1 100644
+--- a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-ubnt-unifi-6-lr.dts
++++ b/target/linux/mediatek/dts/mt7622-ubnt-unifi-6-lr.dts
+@@ -324,4 +324,4 @@
+ 	mediatek,mtd-eeprom = <&factory 0x0>;
+ 	mtd-mac-address = <&eeprom 0x0>;
+ 	status = "okay";
+-};
++};
+\ No newline at end of file
+diff --git a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-bananapi-bpi-r64-rootdisk.dts b/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-bananapi-bpi-r64-rootdisk.dts
+deleted file mode 100644
+index 36d908652d..0000000000
+--- a/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7622-bananapi-bpi-r64-rootdisk.dts
++++ /dev/null
+@@ -1,591 +0,0 @@
+-/*
+- * Copyright (c) 2018 MediaTek Inc.
+- * Author: Ryder Lee <ryder.lee@mediatek.com>
+- *
+- * SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+- */
+-
+-/dts-v1/;
+-#include <dt-bindings/input/input.h>
+-#include <dt-bindings/gpio/gpio.h>
+-
+-#include "mt7622.dtsi"
+-#include "mt6380.dtsi"
+-
+-/ {
+-	model = "Bananapi BPI-R64";
+-	compatible = "bananapi,bpi-r64-rootdisk", "mediatek,mt7622";
+-
+-	aliases {
+-		serial0 = &uart0;
+-	};
+-
+-	chosen {
+-		stdout-path = "serial0:115200n8";
+-		bootargs = "earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk0p7 rootfstype=squashfs,f2fs";
+-	};
+-
+-	cpus {
+-		cpu@0 {
+-			proc-supply = <&mt6380_vcpu_reg>;
+-			sram-supply = <&mt6380_vm_reg>;
+-		};
+-
+-		cpu@1 {
+-			proc-supply = <&mt6380_vcpu_reg>;
+-			sram-supply = <&mt6380_vm_reg>;
+-		};
+-	};
+-
+-	gpio-keys {
+-		compatible = "gpio-keys";
+-
+-		factory {
+-			label = "factory";
+-			linux,code = <BTN_0>;
+-			gpios = <&pio 0 GPIO_ACTIVE_HIGH>;
+-		};
+-
+-		wps {
+-			label = "wps";
+-			linux,code = <KEY_WPS_BUTTON>;
+-			gpios = <&pio 102 GPIO_ACTIVE_HIGH>;
+-		};
+-	};
+-
+-	leds {
+-		compatible = "gpio-leds";
+-
+-		green {
+-			label = "bpi-r64:pio:green";
+-			gpios = <&pio 89 GPIO_ACTIVE_HIGH>;
+-		};
+-
+-		red {
+-			label = "bpi-r64:pio:red";
+-			gpios = <&pio 88 GPIO_ACTIVE_HIGH>;
+-		};
+-	};
+-
+-	memory {
+-		reg = <0 0x40000000 0 0x40000000>;
+-	};
+-
+-	reg_1p8v: regulator-1p8v {
+-		compatible = "regulator-fixed";
+-		regulator-name = "fixed-1.8V";
+-		regulator-min-microvolt = <1800000>;
+-		regulator-max-microvolt = <1800000>;
+-		regulator-always-on;
+-	};
+-
+-	reg_3p3v: regulator-3p3v {
+-		compatible = "regulator-fixed";
+-		regulator-name = "fixed-3.3V";
+-		regulator-min-microvolt = <3300000>;
+-		regulator-max-microvolt = <3300000>;
+-		regulator-boot-on;
+-		regulator-always-on;
+-	};
+-
+-	reg_5v: regulator-5v {
+-		compatible = "regulator-fixed";
+-		regulator-name = "fixed-5V";
+-		regulator-min-microvolt = <5000000>;
+-		regulator-max-microvolt = <5000000>;
+-		regulator-boot-on;
+-		regulator-always-on;
+-	};
+-};
+-
+-&bch {
+-	status = "disabled";
+-};
+-
+-&btif {
+-	status = "okay";
+-};
+-
+-&cir {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&irrx_pins>;
+-	status = "okay";
+-};
+-
+-&eth {
+-	status = "okay";
+-	gmac0: mac@0 {
+-		compatible = "mediatek,eth-mac";
+-		reg = <0>;
+-		phy-mode = "2500base-x";
+-
+-		fixed-link {
+-			speed = <2500>;
+-			full-duplex;
+-			pause;
+-		};
+-	};
+-
+-	gmac1: mac@1 {
+-		compatible = "mediatek,eth-mac";
+-		reg = <1>;
+-		phy-mode = "rgmii";
+-
+-		fixed-link {
+-			speed = <1000>;
+-			full-duplex;
+-			pause;
+-		};
+-	};
+-
+-	mdio: mdio-bus {
+-		#address-cells = <1>;
+-		#size-cells = <0>;
+-
+-		switch@1f {
+-			compatible = "mediatek,mt7531";
+-			reg = <0x1f>;
+-			reset-gpios = <&pio 54 0>;
+-
+-			ports {
+-				#address-cells = <1>;
+-				#size-cells = <0>;
+-
+-				wan: port@0 {
+-					reg = <0>;
+-					label = "wan";
+-				};
+-
+-				port@1 {
+-					reg = <1>;
+-					label = "lan0";
+-				};
+-
+-				port@2 {
+-					reg = <2>;
+-					label = "lan1";
+-				};
+-
+-				port@3 {
+-					reg = <3>;
+-					label = "lan2";
+-				};
+-
+-				port@4 {
+-					reg = <4>;
+-					label = "lan3";
+-				};
+-
+-				port@6 {
+-					reg = <6>;
+-					label = "cpu";
+-					ethernet = <&gmac0>;
+-					phy-mode = "2500base-x";
+-
+-					fixed-link {
+-						speed = <2500>;
+-						full-duplex;
+-						pause;
+-					};
+-				};
+-			};
+-		};
+-
+-	};
+-};
+-
+-&i2c1 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&i2c1_pins>;
+-	status = "okay";
+-};
+-
+-&i2c2 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&i2c2_pins>;
+-	status = "okay";
+-};
+-
+-&mmc0 {
+-	pinctrl-names = "default", "state_uhs";
+-	pinctrl-0 = <&emmc_pins_default>;
+-	pinctrl-1 = <&emmc_pins_uhs>;
+-	status = "okay";
+-	bus-width = <8>;
+-	max-frequency = <50000000>;
+-	cap-mmc-highspeed;
+-	mmc-hs200-1_8v;
+-	vmmc-supply = <&reg_3p3v>;
+-	vqmmc-supply = <&reg_1p8v>;
+-	assigned-clocks = <&topckgen CLK_TOP_MSDC30_0_SEL>;
+-	assigned-clock-parents = <&topckgen CLK_TOP_UNIV48M>;
+-	non-removable;
+-};
+-
+-&mmc1 {
+-	pinctrl-names = "default", "state_uhs";
+-	pinctrl-0 = <&sd0_pins_default>;
+-	pinctrl-1 = <&sd0_pins_uhs>;
+-	status = "okay";
+-	bus-width = <4>;
+-	max-frequency = <50000000>;
+-	cap-sd-highspeed;
+-	r_smpl = <1>;
+-	cd-gpios = <&pio 81 GPIO_ACTIVE_LOW>;
+-	vmmc-supply = <&reg_3p3v>;
+-	vqmmc-supply = <&reg_3p3v>;
+-	assigned-clocks = <&topckgen CLK_TOP_MSDC30_1_SEL>;
+-	assigned-clock-parents = <&topckgen CLK_TOP_UNIV48M>;
+-};
+-
+-&nandc {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&parallel_nand_pins>;
+-	status = "disabled";
+-};
+-
+-&nor_flash {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&spi_nor_pins>;
+-	status = "disabled";
+-
+-	flash@0 {
+-		compatible = "jedec,spi-nor";
+-		reg = <0>;
+-	};
+-};
+-
+-&pcie0 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&pcie0_pins>;
+-	status = "okay";
+-};
+-
+-&pcie1 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&pcie1_pins>;
+-	status = "okay";
+-};
+-
+-&pio {
+-	/* Attention: GPIO 90 is used to switch between PCIe@1,0 and
+-	 * SATA functions. i.e. output-high: PCIe, output-low: SATA
+-	 */
+-	asm_sel {
+-		gpio-hog;
+-		gpios = <90 GPIO_ACTIVE_HIGH>;
+-		output-high;
+-	};
+-
+-	/* eMMC is shared pin with parallel NAND */
+-	emmc_pins_default: emmc-pins-default {
+-		mux {
+-			function = "emmc", "emmc_rst";
+-			groups = "emmc";
+-		};
+-
+-		/* "NDL0","NDL1","NDL2","NDL3","NDL4","NDL5","NDL6","NDL7",
+-		 * "NRB","NCLE" pins are used as DAT0,DAT1,DAT2,DAT3,DAT4,
+-		 * DAT5,DAT6,DAT7,CMD,CLK for eMMC respectively
+-		 */
+-		conf-cmd-dat {
+-			pins = "NDL0", "NDL1", "NDL2",
+-			       "NDL3", "NDL4", "NDL5",
+-			       "NDL6", "NDL7", "NRB";
+-			input-enable;
+-			bias-pull-up;
+-		};
+-
+-		conf-clk {
+-			pins = "NCLE";
+-			bias-pull-down;
+-		};
+-	};
+-
+-	emmc_pins_uhs: emmc-pins-uhs {
+-		mux {
+-			function = "emmc";
+-			groups = "emmc";
+-		};
+-
+-		conf-cmd-dat {
+-			pins = "NDL0", "NDL1", "NDL2",
+-			       "NDL3", "NDL4", "NDL5",
+-			       "NDL6", "NDL7", "NRB";
+-			input-enable;
+-			drive-strength = <4>;
+-			bias-pull-up;
+-		};
+-
+-		conf-clk {
+-			pins = "NCLE";
+-			drive-strength = <4>;
+-			bias-pull-down;
+-		};
+-	};
+-
+-	eth_pins: eth-pins {
+-		mux {
+-			function = "eth";
+-			groups = "mdc_mdio", "rgmii_via_gmac2";
+-		};
+-	};
+-
+-	i2c1_pins: i2c1-pins {
+-		mux {
+-			function = "i2c";
+-			groups =  "i2c1_0";
+-		};
+-	};
+-
+-	i2c2_pins: i2c2-pins {
+-		mux {
+-			function = "i2c";
+-			groups =  "i2c2_0";
+-		};
+-	};
+-
+-	i2s1_pins: i2s1-pins {
+-		mux {
+-			function = "i2s";
+-			groups =  "i2s_out_mclk_bclk_ws",
+-				  "i2s1_in_data",
+-				  "i2s1_out_data";
+-		};
+-
+-		conf {
+-			pins = "I2S1_IN", "I2S1_OUT", "I2S_BCLK",
+-			       "I2S_WS", "I2S_MCLK";
+-			drive-strength = <12>;
+-			bias-pull-down;
+-		};
+-	};
+-
+-	irrx_pins: irrx-pins {
+-		mux {
+-			function = "ir";
+-			groups =  "ir_1_rx";
+-		};
+-	};
+-
+-	irtx_pins: irtx-pins {
+-		mux {
+-			function = "ir";
+-			groups =  "ir_1_tx";
+-		};
+-	};
+-
+-	/* Parallel nand is shared pin with eMMC */
+-	parallel_nand_pins: parallel-nand-pins {
+-		mux {
+-			function = "flash";
+-			groups = "par_nand";
+-		};
+-	};
+-
+-	pcie0_pins: pcie0-pins {
+-		mux {
+-			function = "pcie";
+-			groups = "pcie0_pad_perst",
+-				 "pcie0_1_waken",
+-				 "pcie0_1_clkreq";
+-		};
+-	};
+-
+-	pcie1_pins: pcie1-pins {
+-		mux {
+-			function = "pcie";
+-			groups = "pcie1_pad_perst",
+-				 "pcie1_0_waken",
+-				 "pcie1_0_clkreq";
+-		};
+-	};
+-
+-	pmic_bus_pins: pmic-bus-pins {
+-		mux {
+-			function = "pmic";
+-			groups = "pmic_bus";
+-		};
+-	};
+-
+-	pwm7_pins: pwm1-2-pins {
+-		mux {
+-			function = "pwm";
+-			groups = "pwm_ch7_2";
+-		};
+-	};
+-
+-	wled_pins: wled-pins {
+-		mux {
+-			function = "led";
+-			groups = "wled";
+-		};
+-	};
+-
+-	sd0_pins_default: sd0-pins-default {
+-		mux {
+-			function = "sd";
+-			groups = "sd_0";
+-		};
+-
+-		/* "I2S2_OUT, "I2S4_IN"", "I2S3_IN", "I2S2_IN",
+-		 *  "I2S4_OUT", "I2S3_OUT" are used as DAT0, DAT1,
+-		 *  DAT2, DAT3, CMD, CLK for SD respectively.
+-		 */
+-		conf-cmd-data {
+-			pins = "I2S2_OUT", "I2S4_IN", "I2S3_IN",
+-			       "I2S2_IN","I2S4_OUT";
+-			input-enable;
+-			drive-strength = <8>;
+-			bias-pull-up;
+-		};
+-		conf-clk {
+-			pins = "I2S3_OUT";
+-			drive-strength = <12>;
+-			bias-pull-down;
+-		};
+-		conf-cd {
+-			pins = "TXD3";
+-			bias-pull-up;
+-		};
+-	};
+-
+-	sd0_pins_uhs: sd0-pins-uhs {
+-		mux {
+-			function = "sd";
+-			groups = "sd_0";
+-		};
+-
+-		conf-cmd-data {
+-			pins = "I2S2_OUT", "I2S4_IN", "I2S3_IN",
+-			       "I2S2_IN","I2S4_OUT";
+-			input-enable;
+-			bias-pull-up;
+-		};
+-
+-		conf-clk {
+-			pins = "I2S3_OUT";
+-			bias-pull-down;
+-		};
+-	};
+-
+-	/* Serial NAND is shared pin with SPI-NOR */
+-	serial_nand_pins: serial-nand-pins {
+-		mux {
+-			function = "flash";
+-			groups = "snfi";
+-		};
+-	};
+-
+-	spic0_pins: spic0-pins {
+-		mux {
+-			function = "spi";
+-			groups = "spic0_0";
+-		};
+-	};
+-
+-	spic1_pins: spic1-pins {
+-		mux {
+-			function = "spi";
+-			groups = "spic1_0";
+-		};
+-	};
+-
+-	/* SPI-NOR is shared pin with serial NAND */
+-	spi_nor_pins: spi-nor-pins {
+-		mux {
+-			function = "flash";
+-			groups = "spi_nor";
+-		};
+-	};
+-
+-	/* serial NAND is shared pin with SPI-NOR */
+-	serial_nand_pins: serial-nand-pins {
+-		mux {
+-			function = "flash";
+-			groups = "snfi";
+-		};
+-	};
+-
+-	uart0_pins: uart0-pins {
+-		mux {
+-			function = "uart";
+-			groups = "uart0_0_tx_rx" ;
+-		};
+-	};
+-
+-	uart2_pins: uart2-pins {
+-		mux {
+-			function = "uart";
+-			groups = "uart2_1_tx_rx" ;
+-		};
+-	};
+-
+-	watchdog_pins: watchdog-pins {
+-		mux {
+-			function = "watchdog";
+-			groups = "watchdog";
+-		};
+-	};
+-};
+-
+-&pwm {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&pwm7_pins>;
+-	status = "okay";
+-};
+-
+-&pwrap {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&pmic_bus_pins>;
+-
+-	status = "okay";
+-};
+-
+-&sata {
+-	status = "disable";
+-};
+-
+-&sata_phy {
+-	status = "disable";
+-};
+-
+-&spi0 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&spic0_pins>;
+-	status = "okay";
+-};
+-
+-&spi1 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&spic1_pins>;
+-	status = "okay";
+-};
+-
+-&ssusb {
+-	vusb33-supply = <&reg_3p3v>;
+-	vbus-supply = <&reg_5v>;
+-	status = "okay";
+-};
+-
+-&u3phy {
+-	status = "okay";
+-};
+-
+-&uart0 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&uart0_pins>;
+-	status = "okay";
+-};
+-
+-&uart2 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&uart2_pins>;
+-	status = "okay";
+-};
+-
+-&watchdog {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&watchdog_pins>;
+-	status = "okay";
+-};
+diff --git a/target/linux/mediatek/image/Config.in b/target/linux/mediatek/image/Config.in
+deleted file mode 100644
+index ef8536ebab..0000000000
+--- a/target/linux/mediatek/image/Config.in
++++ /dev/null
+@@ -1,4 +0,0 @@
+-config MTK_BOOT_PARTSIZE
+-       int "Boot (SD Card/eMMC) filesystem partition size (in MiB)"
+-       depends on TARGET_mediatek_mt7623_DEVICE_bpi_bananapi-r2 || TARGET_DEVICE_mediatek_mt7623_DEVICE_bpi_bananapi-r2 || TARGET_mediatek_mt7623_DEVICE_unielec_u7623-emmc || TARGET_DEVICE_mediatek_mt7623_DEVICE_unielec_u7623-emmc
+-       default 32
 diff --git a/target/linux/mediatek/image/Makefile b/target/linux/mediatek/image/Makefile
 index 45e83cece5..5d37b14932 100644
 --- a/target/linux/mediatek/image/Makefile
@@ -2275,11 +3100,238 @@ index 45e83cece5..5d37b14932 100644
 -
 +$(eval $(call BuildImage))
 \ No newline at end of file
+diff --git a/target/linux/mediatek/image/gen_mt7622_emmc_img.sh b/target/linux/mediatek/image/gen_mt7622_emmc_img.sh
+deleted file mode 100755
+index d74068c7b1..0000000000
+--- a/target/linux/mediatek/image/gen_mt7622_emmc_img.sh
++++ /dev/null
+@@ -1,19 +0,0 @@
+-#!/bin/sh
+-
+-OUTPUT_FILE=$1
+-KERNEL_FILE=$2
+-RECOVERY_FILE=$3
+-ROOTFS_FILE=$4
+-
+-BS=512
+-
+-#RECOVERY_OFFSET= kernel size / BS = 20M / 512 (blocks)
+-RECOVERY_OFFSET=40960
+-
+-#ROOTFS_OFFSET = RECOVERY_OFFSET + (RECOVERY_SIZE / BS)
+-#	       = 40960 + (10M  / 512) (blocks)
+-ROOTFS_OFFSET=61440
+-dd bs="$BS" of="$OUTPUT_FILE" if="$KERNEL_FILE"
+-dd bs="$BS" of="$OUTPUT_FILE" if="$RECOVERY_FILE" seek="$RECOVERY_OFFSET"
+-dd bs="$BS" of="$OUTPUT_FILE" if="$ROOTFS_FILE" seek="$ROOTFS_OFFSET"
+-dd if=/dev/zero of="$OUTPUT_FILE" bs=128k count=1 oflag=append conv=notrunc
+diff --git a/target/linux/mediatek/image/gen_mt7623_emmc_img.sh b/target/linux/mediatek/image/gen_mt7623_emmc_img.sh
+deleted file mode 100755
+index b9eedf80b4..0000000000
+--- a/target/linux/mediatek/image/gen_mt7623_emmc_img.sh
++++ /dev/null
+@@ -1,30 +0,0 @@
+-#!/bin/sh
+-#
+-# This script is used only to create the "legacy" image for UniElec U7623,
+-# suitable for upgrading from the vendor OpenWrt or from OpenWrt 19.07.
+-#
+-OUTPUT_FILE=$1
+-KERNEL_FILE=$2
+-RECOVERY_FILE=$3
+-ROOTFS_FILE=$4
+-
+-BS=512
+-
+-# These two offsets are relative to the absolute location of the kernel on the mmc
+-# (0xA00), so their position in the image is -2560 blocks
+-#
+-# They must be kept in sync with the default command line for U7623.
+-# blkdevparts=mmcblk0:3M@6M(recovery),256M@9M(root)"
+-#
+-# For upgrading from the vendor firmware, the total image must fit in its
+-# MTD 'firmware' partition, which is typically 36MiB.
+-
+-# In the legacy image, the uImage starts at block 0xa00. Allow 4864 KiB (9728) blocks.
+-RECOVERY_OFFSET=9728
+-# The recovery image is 3MiB, or 6144 blocks.
+-ROOTFS_OFFSET=15872
+-
+-dd bs="$BS" of="$OUTPUT_FILE" if="$KERNEL_FILE"
+-dd bs="$BS" of="$OUTPUT_FILE" if="$RECOVERY_FILE" seek="$RECOVERY_OFFSET"
+-dd bs="$BS" of="$OUTPUT_FILE" if="$ROOTFS_FILE" seek="$ROOTFS_OFFSET"
+-dd if=/dev/zero of="$OUTPUT_FILE" bs=128k count=1 oflag=append conv=notrunc
+diff --git a/target/linux/mediatek/image/gen_mtk_mmc_img.sh b/target/linux/mediatek/image/gen_mtk_mmc_img.sh
+deleted file mode 100755
+index 7e19e1a39e..0000000000
+--- a/target/linux/mediatek/image/gen_mtk_mmc_img.sh
++++ /dev/null
+@@ -1,147 +0,0 @@
+-#!/bin/bash
+-# SPDX-License-Identifier: GPL-2.0-only
+-#
+-# Copyright © 2019 Alexey Loukianov <lx2@lexa2.ru>
+-# Copyright © 2020 David Woodhouse <dwmw2@infradead.org>
+-
+-# Generates a bootable SD card image for Banana Pi R2 (and probably
+-# other similar boards) as documented at
+-# http://www.fw-web.de/dokuwiki/doku.php?id=en:bpi-r2:storage
+-#
+-# The first sector must contain the SDMMC_BOOT header shown
+-# below, and also contains the MBR partition table in the end
+-# of the sector. The partition table must contain no active
+-# partitions.
+-#
+-# The second sector must contain the BRLYT header, and the
+-# special preloader image goes in sector 4; 2KiB into the image.
+-#
+-# The preloader loads U-Boot from  sector 640; 320KiB into the image.
+-# The location and the size (512KiB) are fixed and not read from
+-# the partition table. We set up a partition for it merely for
+-# our own convenience for upgrades, etc.
+-#
+-# The second partition is a FAT file system containing the kernel
+-# image and a uboot.env file, which is provided to this script as
+-# $4 (bootfs image). Its size is configurable with the
+-# CONFIG_MTK_BOOT_PARTSIZE option; by default 32MiB.
+-#
+-# The root filesystem comes next in the third partition.
+-#
+-#
+-#   ------------------------   Sector   Offset
+-#   |  MBR + SDMMC_BOOT    |     0       0x0
+-#   |----------------------|
+-#   |     BRLYT header     |     1       0x200
+-#   |----------------------|
+-#   .                      .
+-#   .                      .
+-#   |----------------------|
+-#   |                      |     4       0x800
+-#   |                      |
+-#   |     Preloader        |
+-#   .                      .
+-#   .                      .
+-#   |                      |     639
+-#   |----------------------|
+-#   |   MBR partition #1   |     640     0x50000
+-#   |                      |
+-#   |       U-Boot         |
+-#   .                      .
+-#   .                      .
+-#   |                      |     1663
+-#   |----------------------|
+-#   |   MBR partition #2   |
+-#   |                      |
+-#   |    FAT partition     |   ( MTK_BOOT_PARTSIZE
+-#   .                      .     default 32MiB )
+-#   .    (kernel, uEnv)    .
+-#   |                      |
+-#   |----------------------|
+-#   |   MBR partition #3   |
+-#   |                      |
+-#   |   Root partition     |
+-#   |                      |   ( TARGET_ROOTFS_PARTSIZE
+-#   |  (squashfs+overlay   |     default 104MiB )
+-#   .    or ext4, etc.)    .
+-#   .                      .
+-#   |                      |
+-#   ------------------------
+-#
+-# For eMMC boot, everything up to and including the preloader must be
+-# written to /dev/mmcblk0boot0, with the SDMMC_BOOT header changed to
+-# read EMMC_BOOT\0 instead.
+-#
+-# The contents of the main eMMC are identical to the SD card layout,
+-# with the preloader loading 512KiB of U-Boot starting at 0x50000.
+-
+-usage() {
+-    echo "SYNTAX: $0 sd <file> <preloader image> <u-boot image> <u-boot offset> <bootfs image> <rootfs image> <bootfs size> <rootfs size>"
+-    echo " OR:    $0 emmc <file> <preloader image>"
+-    exit 1
+-}
+-
+-set -e
+-
+-PRELOADER_OFFSET=2     # 2KiB
+-
+-SDMMC_BOOT="SDMMC_BOOT\x00\x00\x01\x00\x00\x00\x00\x02\x00\x00"
+-EMMC_BOOT="EMMC_BOOT\x00\x00\x00\x01\x00\x00\x00\x00\x02\x00\x00"
+-BRLYT="BRLYT\x00\x00\x00\x01\x00\x00\x00\x00\x08\x00\x00\
+-\x00\x08\x00\x00\x42\x42\x42\x42\x08\x00\x01\x00\x00\x08\x00\x00\
+-\x00\x08\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-
+-case $1 in
+- sd)
+-	[ $# -eq 9 ] || usage
+-	OUTPUT="$2"
+-	PRELOADER="$3"
+-	UBOOT="$4"
+-	UBOOTOFS="$5"
+-	BOOTFS="$6"
+-	ROOTFS="$7"
+-	BOOTFSSIZE="$8"
+-	ROOTFSSIZE="$9"
+-
+-	head=4
+-	sect=63
+-
+-	set $(ptgen -o $OUTPUT -h $head -s $sect -a 0 -l 1024 \
+-		    -t 41 -p 512k@${UBOOTOFS} \
+-		    -t c -p ${BOOTFSSIZE}M \
+-		    -t 83 -p ${ROOTFSSIZE}M )
+-
+-	UBOOT_OFFSET="$(($1 / 512))"
+-	UBOOT_SIZE="$(($2 / 512))"
+-	BOOTFS_OFFSET="$(($3 / 512))"
+-	BOOTFS_SIZE="$(($4 / 512))"
+-	ROOTFS_OFFSET="$(($5 / 512))"
+-	ROOTFS_SIZE="$(($6 / 512))"
+-
+-	echo -en "${SDMMC_BOOT}" | dd bs=1 of="${OUTPUT}" seek=0   conv=notrunc
+-	echo -en "${BRLYT}"      | dd bs=1 of="${OUTPUT}" seek=512 conv=notrunc
+-
+-	# For eMMC-only boards like U7623 the preloader doesn't need to be included in the
+-	# main image as it's only ever needed in the eMMC boot partition.
+-	if [ -r ${PRELOADER} ]; then
+-	    dd bs=1024 if="${PRELOADER}" of="${OUTPUT}" seek="${PRELOADER_OFFSET}" conv=notrunc
+-	fi
+-	dd bs=512  if="${UBOOT}"     of="${OUTPUT}" seek="${UBOOT_OFFSET}"     conv=notrunc
+-	dd bs=512  if="${BOOTFS}"    of="${OUTPUT}" seek="${BOOTFS_OFFSET}"    conv=notrunc
+-	dd bs=512  if="${ROOTFS}"    of="${OUTPUT}" seek="${ROOTFS_OFFSET}"    conv=notrunc
+-	dd bs=128k if=/dev/zero      of="${OUTPUT}" count=1    oflag=append    conv=notrunc
+-	;;
+- emmc)
+-	[ $# -eq 3 ] || usage
+-	OUTPUT="$2"
+-	PRELOADER="$3"
+-
+-	echo -en "${EMMC_BOOT}"  | dd bs=1 of="${OUTPUT}" seek=0
+-	echo -en "${BRLYT}"      | dd bs=1 of="${OUTPUT}" seek=512 conv=notrunc
+-
+-	dd bs=1024 if="${PRELOADER}" of="${OUTPUT}" seek="${PRELOADER_OFFSET}" conv=notrunc
+-	;;
+- *)
+-	usage
+-	;;
+-esac
+diff --git a/target/linux/mediatek/image/gen_scatterfile.sh b/target/linux/mediatek/image/gen_scatterfile.sh
+index 15fc0bc84c..68fc6346ac 100755
+--- a/target/linux/mediatek/image/gen_scatterfile.sh
++++ b/target/linux/mediatek/image/gen_scatterfile.sh
+@@ -70,4 +70,4 @@ cat <<EOF
+   operation_type: UPDATE
+   d_type: FALSE
+   reserve: 0x00
+-EOF
++EOF
+\ No newline at end of file
 diff --git a/target/linux/mediatek/image/mt7622.mk b/target/linux/mediatek/image/mt7622.mk
-index bf706930e4..51af0066a1 100644
+index bf706930e4..7e8a7f3002 100644
 --- a/target/linux/mediatek/image/mt7622.mk
 +++ b/target/linux/mediatek/image/mt7622.mk
-@@ -1,26 +1,57 @@
+@@ -1,32 +1,64 @@
++DTS_DIR := $(DTS_DIR)/mediatek
++
  KERNEL_LOADADDR := 0x44080000
  
 -define Device/bpi_bananapi-r64
@@ -2298,6 +3350,11 @@ index bf706930e4..51af0066a1 100644
 -  DEVICE_VENDOR := Bpi
 -  DEVICE_MODEL := Banana Pi R64 (rootdisk)
 -  DEVICE_DTS := mt7622-bananapi-bpi-r64-rootdisk
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+-  SUPPORTED_DEVICES := bananapi,bpi-r64
+-  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
+-  IMAGES := sysupgrade-emmc.bin.gz
+-  IMAGE/sysupgrade-emmc.bin.gz := sysupgrade-emmc | gzip | append-metadata
 +define Build/bl2
 +	cat $(STAGING_DIR_IMAGE)/mt7622-$1-bl2.img >> $@
 +endef
@@ -2327,11 +3384,6 @@ index bf706930e4..51af0066a1 100644
 +  DEVICE_VENDOR := Bananapi
 +  DEVICE_MODEL := BPi-R64
 +  DEVICE_DTS := mt7622-bananapi-bpi-r64
-   DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
--  SUPPORTED_DEVICES := bananapi,bpi-r64
--  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
--  IMAGES := sysupgrade-emmc.bin.gz
--  IMAGE/sysupgrade-emmc.bin.gz := sysupgrade-emmc | gzip | append-metadata
 +  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk \
 +		     kmod-mt7615e kmod-mt7615-firmware \
 +		     uboot-mt7622_bananapi_bpi-r64-emmc \
@@ -2354,8 +3406,164 @@ index bf706930e4..51af0066a1 100644
  
  define Device/elecom_wrc-2533gent
    DEVICE_VENDOR := Elecom
+   DEVICE_MODEL := WRC-2533GENT
+   DEVICE_DTS := mt7622-elecom-wrc-2533gent
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
++  DEVICE_DTS_DIR := ../dts
+   DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-mt7615e \
+ 	kmod-mt7615-firmware kmod-btmtkuart swconfig
+ endef
+@@ -36,7 +68,6 @@ define Device/mediatek_mt7622-rfb1
+   DEVICE_VENDOR := MediaTek
+   DEVICE_MODEL := MTK7622 rfb1 AP
+   DEVICE_DTS := mt7622-rfb1
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+   DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
+ endef
+ TARGET_DEVICES += mediatek_mt7622-rfb1
+@@ -45,7 +76,7 @@ define Device/mediatek_mt7622-ubi
+   DEVICE_VENDOR := MediaTek
+   DEVICE_MODEL := MTK7622 AP (UBI)
+   DEVICE_DTS := mt7622-rfb1-ubi
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
++  DEVICE_DTS_DIR := ../dts
+   UBINIZE_OPTS := -E 5
+   BLOCKSIZE := 128k
+   PAGESIZE := 2048
+@@ -63,7 +94,7 @@ define Device/ubnt_unifi-6-lr
+   DEVICE_VENDOR := Ubiquiti
+   DEVICE_MODEL := UniFi 6 LR
+   DEVICE_DTS := mt7622-ubnt-unifi-6-lr
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
++  DEVICE_DTS_DIR := ../dts
+   DEVICE_PACKAGES := kmod-mt7915e
+ endef
+ TARGET_DEVICES += ubnt_unifi-6-lr
+diff --git a/target/linux/mediatek/mt7622/base-files/etc/board.d/02_network b/target/linux/mediatek/mt7622/base-files/etc/board.d/02_network
+index 3a409c8ec9..4c9555bb96 100755
+--- a/target/linux/mediatek/mt7622/base-files/etc/board.d/02_network
++++ b/target/linux/mediatek/mt7622/base-files/etc/board.d/02_network
+@@ -9,7 +9,6 @@ mediatek_setup_interfaces()
+ 	local board="$1"
+ 
+ 	case $board in
+-	bananapi,bpi-r64-rootdisk|\
+ 	bananapi,bpi-r64)
+ 		ucidef_set_interfaces_lan_wan "lan0 lan1 lan2 lan3" wan
+ 		;;
+@@ -40,4 +39,4 @@ mediatek_setup_interfaces $board
+ mediatek_setup_macs $board
+ board_config_flush
+ 
+-exit 0
++exit 0
+\ No newline at end of file
+diff --git a/target/linux/mediatek/mt7622/base-files/lib/upgrade/platform.sh b/target/linux/mediatek/mt7622/base-files/lib/upgrade/platform.sh
+index 8144476943..c4f4fc81ba 100755
+--- a/target/linux/mediatek/mt7622/base-files/lib/upgrade/platform.sh
++++ b/target/linux/mediatek/mt7622/base-files/lib/upgrade/platform.sh
+@@ -1,13 +1,52 @@
++REQUIRE_IMAGE_METADATA=1
++
+ platform_do_upgrade() {
+ 	local board=$(board_name)
++	local file_type=$(identify $1)
+ 
+ 	case "$board" in
+-	bananapi,bpi-r64-rootdisk)
+-		#2097152=0x200000 is the offset in bytes from the start
+-		#of eMMC and to the location of the kernel
+-		get_image "$1" | dd of=/dev/mmcblk0 bs=2097152 seek=1 conv=fsync
++	bananapi,bpi-r64)
++		export_bootdevice
++		export_partdevice rootdev 0
++		case "$rootdev" in
++		mmc*)
++			CI_ROOTDEV="$rootdev"
++			CI_KERNPART="production"
++			emmc_do_upgrade "$1"
++			;;
++		*)
++			CI_KERNPART="fit"
++			nand_do_upgrade "$1"
++			;;
++		esac
++		;;
++	buffalo,wsr-2533dhp2)
++		local magic="$(get_magic_long "$1")"
++
++		# use "mtd write" if the magic is "DHP2 (0x44485032)"
++		# or "DHP3 (0x44485033)"
++		if [ "$magic" = "44485032" -o "$magic" = "44485033" ]; then
++			buffalo_upgrade_ubinized "$1"
++		else
++			CI_KERNPART="firmware"
++			nand_do_upgrade "$1"
++		fi
++		;;
++	linksys,e8450-ubi)
++		CI_KERNPART="fit"
++		nand_do_upgrade "$1"
++		;;
++	linksys,e8450)
++		if grep -q mtdparts=slave /proc/cmdline; then
++			PART_NAME=firmware2
++		else
++			PART_NAME=firmware1
++		fi
++		default_do_upgrade "$1"
+ 		;;
+-	mediatek,mt7622,ubi)
++	mediatek,mt7622-rfb1-ubi|\
++	totolink,a8000ru|\
++	xiaomi,redmi-router-ax6s)
+ 		nand_do_upgrade "$1"
+ 		;;
+ 	*)
+@@ -25,6 +64,14 @@ platform_check_image() {
+ 	[ "$#" -gt 1 ] && return 1
+ 
+ 	case "$board" in
++	buffalo,wsr-2533dhp2)
++		buffalo_check_image "$board" "$magic" "$1" || return 1
++		;;
++	mediatek,mt7622-rfb1-ubi|\
++	totolink,a8000ru|\
++	xiaomi,redmi-router-ax6s)
++		nand_do_platform_check "$board" "$1"
++		;;
+ 	*)
+ 		[ "$magic" != "d00dfeed" ] && {
+ 			echo "Invalid image type."
+@@ -37,18 +84,14 @@ platform_check_image() {
+ 	return 0
+ }
+ 
+-platform_copy_config_emmc() {
+-	mkdir -p /recovery
+-	mount -o rw,noatime /dev/mmcblk0p6 /recovery
+-	cp -af "$UPGRADE_BACKUP" "/recovery/$BACKUP_FILE"
+-	sync
+-	umount /recovery
+-}
+-
+ platform_copy_config() {
+ 	case "$(board_name)" in
+-	bananapi,bpi-r64-rootdisk)
+-		platform_copy_config_emmc
++	bananapi,bpi-r64)
++		export_bootdevice
++		export_partdevice rootdev 0
++		if echo $rootdev | grep -q mmc; then
++			emmc_copy_config
++		fi
+ 		;;
+ 	esac
+-}
++}
+\ No newline at end of file
 diff --git a/target/linux/mediatek/mt7622/config-5.4 b/target/linux/mediatek/mt7622/config-5.4
-index 282cd0bab5..c029f1c726 100644
+index 282cd0bab5..ea20fb2908 100644
 --- a/target/linux/mediatek/mt7622/config-5.4
 +++ b/target/linux/mediatek/mt7622/config-5.4
 @@ -2,58 +2,6 @@ CONFIG_64BIT=y
@@ -2439,7 +3647,7 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_ARM64=y
  CONFIG_ARM64_4K_PAGES=y
  # CONFIG_ARM64_CNP is not set
-@@ -110,7 +44,6 @@ CONFIG_ARM_GIC_V3=y
+@@ -110,10 +44,10 @@ CONFIG_ARM_GIC_V3=y
  CONFIG_ARM_GIC_V3_ITS=y
  CONFIG_ARM_GIC_V3_ITS_PCI=y
  CONFIG_ARM_MEDIATEK_CPUFREQ=y
@@ -2447,7 +3655,11 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_ARM_PSCI_FW=y
  CONFIG_ATA=y
  CONFIG_AUDIT_ARCH_COMPAT_GENERIC=y
-@@ -122,7 +55,6 @@ CONFIG_BLOCK_COMPAT=y
++CONFIG_BLK_DEV_LOOP=y
+ CONFIG_BLK_DEV_SD=y
+ CONFIG_BLK_MQ_PCI=y
+ CONFIG_BLK_PM=y
+@@ -122,7 +56,6 @@ CONFIG_BLOCK_COMPAT=y
  CONFIG_BSD_PROCESS_ACCT=y
  CONFIG_BSD_PROCESS_ACCT_V3=y
  # CONFIG_CAVIUM_TX2_ERRATUM_219 is not set
@@ -2455,12 +3667,21 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_CLKDEV_LOOKUP=y
  CONFIG_CLKSRC_MMIO=y
  CONFIG_CLOCK_THERMAL=y
-@@ -224,14 +156,10 @@ CONFIG_DRM_RCAR_WRITEBACK=y
+@@ -184,6 +117,7 @@ CONFIG_CRYPTO_ACOMP2=y
+ CONFIG_CRYPTO_AEAD=y
+ CONFIG_CRYPTO_AEAD2=y
+ CONFIG_CRYPTO_CMAC=y
++CONFIG_CRYPTO_CRC32=y
+ CONFIG_CRYPTO_DEFLATE=y
+ CONFIG_CRYPTO_DRBG=y
+ CONFIG_CRYPTO_DRBG_HMAC=y
+@@ -224,14 +158,11 @@ CONFIG_DRM_RCAR_WRITEBACK=y
  CONFIG_DTC=y
  CONFIG_DYNAMIC_DEBUG=y
  CONFIG_EDAC_SUPPORT=y
 -CONFIG_EFI_EARLYCON=y
  CONFIG_EINT_MTK=y
++CONFIG_F2FS_FS=y
  CONFIG_FIXED_PHY=y
  CONFIG_FIX_EARLYCON_MEM=y
  # CONFIG_FLATMEM_MANUAL is not set
@@ -2470,7 +3691,7 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_FRAME_POINTER=y
  # CONFIG_FUJITSU_ERRATUM_010001 is not set
  CONFIG_FW_LOADER_PAGED_BUF=y
-@@ -273,65 +201,7 @@ CONFIG_HARDIRQS_SW_RESEND=y
+@@ -273,65 +204,9 @@ CONFIG_HARDIRQS_SW_RESEND=y
  CONFIG_HAS_DMA=y
  CONFIG_HAS_IOMEM=y
  CONFIG_HAS_IOPORT_MAP=y
@@ -2533,10 +3754,12 @@ index 282cd0bab5..c029f1c726 100644
 -CONFIG_HAVE_VIRT_CPU_ACCOUNTING_GEN=y
  CONFIG_HOLES_IN_ZONE=y
 -# CONFIG_HW_RANDOM_MTK is not set
++CONFIG_HW_RANDOM=y
++CONFIG_HW_RANDOM_MTK=y
  CONFIG_HZ=250
  CONFIG_HZ_250=y
  CONFIG_I2C=y
-@@ -344,26 +214,6 @@ CONFIG_IKCONFIG=y
+@@ -344,26 +219,6 @@ CONFIG_IKCONFIG=y
  CONFIG_IKCONFIG_PROC=y
  CONFIG_ILLEGAL_POINTER_VALUE=0xdead000000000000
  CONFIG_INITRAMFS_SOURCE=""
@@ -2563,7 +3786,7 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_IO_URING=y
  CONFIG_IRQCHIP=y
  CONFIG_IRQ_DOMAIN=y
-@@ -389,10 +239,11 @@ CONFIG_MESSAGE_LOGLEVEL_DEFAULT=7
+@@ -389,8 +244,8 @@ CONFIG_MESSAGE_LOGLEVEL_DEFAULT=7
  CONFIG_MFD_SYSCON=y
  CONFIG_MIGRATION=y
  CONFIG_MMC=y
@@ -2572,11 +3795,8 @@ index 282cd0bab5..c029f1c726 100644
 -CONFIG_MODULES_TREE_LOOKUP=y
  CONFIG_MODULES_USE_ELF_RELA=y
  CONFIG_MT753X_GSW=y
-+CONFIG_MTD_CMDLINE_PARTS=y
  CONFIG_MTD_NAND_CORE=y
- CONFIG_MTD_NAND_ECC_SW_HAMMING=y
- CONFIG_MTD_NAND_MTK=y
-@@ -423,7 +274,6 @@ CONFIG_NET_DSA=y
+@@ -423,7 +278,6 @@ CONFIG_NET_DSA=y
  CONFIG_NET_DSA_MT7530=y
  CONFIG_NET_DSA_TAG_MTK=y
  CONFIG_NET_FLOW_LIMIT=y
@@ -2584,7 +3804,7 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_NET_MEDIATEK_SOC=y
  CONFIG_NET_SWITCHDEV=y
  CONFIG_NET_VENDOR_MEDIATEK=y
-@@ -478,7 +328,6 @@ CONFIG_PINCTRL_MT7622=y
+@@ -478,7 +332,6 @@ CONFIG_PINCTRL_MT7622=y
  CONFIG_PINCTRL_MT8516=y
  CONFIG_PINCTRL_MTK=y
  CONFIG_PINCTRL_MTK_MOORE=y
@@ -2592,23 +3812,6 @@ index 282cd0bab5..c029f1c726 100644
  CONFIG_PM=y
  CONFIG_PM_CLK=y
  CONFIG_PM_GENERIC_DOMAINS=y
-@@ -528,8 +377,6 @@ CONFIG_SERIAL_OF_PLATFORM=y
- CONFIG_SGL_ALLOC=y
- CONFIG_SG_POOL=y
- CONFIG_SMP=y
--# CONFIG_SND_SOC_MT6797 is not set
--# CONFIG_SND_SOC_MT8183 is not set
- CONFIG_SPARSEMEM=y
- CONFIG_SPARSEMEM_EXTREME=y
- CONFIG_SPARSEMEM_MANUAL=y
-@@ -590,3 +437,6 @@ CONFIG_XPS=y
- CONFIG_ZLIB_DEFLATE=y
- CONFIG_ZLIB_INFLATE=y
- CONFIG_ZONE_DMA32=y
-+CONFIG_HW_RANDOM_MTK=y
-+# CONFIG_SND_SOC_MT6797 is not set
-+# CONFIG_SND_SOC_MT8183 is not set
-\ No newline at end of file
 diff --git a/target/linux/mediatek/mt7622/target.mk b/target/linux/mediatek/mt7622/target.mk
 index cb5a6b48cd..f880d859c4 100644
 --- a/target/linux/mediatek/mt7622/target.mk
