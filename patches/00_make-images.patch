@@ -1,0 +1,3467 @@
+From f94737d6b5fdf2cf6811e30b341e8fc5fbdb551e Mon Sep 17 00:00:00 2001
+From: TorGuard Ops <ops@torguard.net>
+Date: Wed, 14 Sep 2022 03:59:54 +0000
+Subject: [PATCH] R64 Fix
+
+---
+ include/image-commands.mk                     |   4 +
+ package/boot/uboot-mediatek/Makefile          |  66 ++-
+ .../002-nand-add-spi-nand-driver.patch        | 123 +----
+ ...boot-add-dts-and-config-for-spi-nand.patch |  11 +-
+ ...le-mtd-and-mtk_spi_nand-in-defconfig.patch |  17 -
+ .../patches/005-update-bpir2-defconfig.patch  |  11 +-
+ .../006-cmd-button-return-button-status.patch |  38 ++
+ .../patches/007-env-readmem.patch             | 116 +++++
+ .../patches/008-bootmenu-custom-title.patch   |  32 ++
+ ...7622-generic-reset-button-ignore-env.patch |  35 ++
+ .../patches/010-no-binman.patch               |   6 +-
+ .../patches/010-update-u7623-defconfig.patch  |   2 -
+ ...-update-bananapi-bpi-r64-device-tree.patch |  95 ++++
+ .../patches/016-fit-totalsize.patch           | 132 ++++++
+ .../017-add-bananapi_bpi-r64_defconfigs.patch | 355 ++++++++++++++
+ .../patches/020-add-linksys-e8450.patch       | 436 ++++++++++++++++++
+ .../100-increase-CONFIG_SYS_BOOTM_LEN.patch   |  11 +
+ scripts/mkits.sh                              | 141 +++++-
+ target/linux/mediatek/Makefile                |   3 +-
+ target/linux/mediatek/image/Makefile          |  15 +-
+ target/linux/mediatek/image/mt7622.mk         |  77 +++-
+ target/linux/mediatek/mt7622/target.mk        |   4 +-
+ tools/firmware-utils/Makefile                 |   2 +-
+ tools/firmware-utils/src/bcm4908img.c         | 379 +++++++++++++++
+ tools/firmware-utils/src/bcm4908kernel.c      |  16 +-
+ tools/firmware-utils/src/ptgen.c              |  81 +++-
+ tools/firmware-utils/src/tplink-safeloader.c  | 114 ++---
+ tools/firmware-utils/src/zytrx.c              | 228 ---------
+ 28 files changed, 2009 insertions(+), 541 deletions(-)
+ create mode 100644 package/boot/uboot-mediatek/patches/006-cmd-button-return-button-status.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/007-env-readmem.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/008-bootmenu-custom-title.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/009-mt7622-generic-reset-button-ignore-env.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/015-update-bananapi-bpi-r64-device-tree.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/016-fit-totalsize.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/020-add-linksys-e8450.patch
+ create mode 100644 package/boot/uboot-mediatek/patches/100-increase-CONFIG_SYS_BOOTM_LEN.patch
+ create mode 100644 tools/firmware-utils/src/bcm4908img.c
+ delete mode 100644 tools/firmware-utils/src/zytrx.c
+
+diff --git a/include/image-commands.mk b/include/image-commands.mk
+index 4d54a14ba4..b050b9dad3 100644
+--- a/include/image-commands.mk
++++ b/include/image-commands.mk
+@@ -27,6 +27,10 @@ define Build/append-kernel
+ 	dd if=$(IMAGE_KERNEL) >> $@
+ endef
+ 
++define Build/append-image
++	dd if=$(BIN_DIR)/$(IMG_PREFIX)$(if $(PROFILE_SANITIZED),-$(PROFILE_SANITIZED))-$(1) >> $@
++endef
++
+ compat_version=$(if $(DEVICE_COMPAT_VERSION),$(DEVICE_COMPAT_VERSION),1.0)
+ json_quote=$(subst ','\'',$(subst ",\",$(1)))
+ #")')
+diff --git a/package/boot/uboot-mediatek/Makefile b/package/boot/uboot-mediatek/Makefile
+index c46b906cb5..6904b39938 100644
+--- a/package/boot/uboot-mediatek/Makefile
++++ b/package/boot/uboot-mediatek/Makefile
+@@ -3,6 +3,7 @@ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_VERSION:=2020.10
+ PKG_HASH:=0d481bbdc05c0ee74908ec2f56a6daa53166cc6a78a0e4fac2ac5d025770a622
++PKG_BUILD_DEPENDS:=arm-trusted-firmware-tools/host
+ 
+ include $(INCLUDE_DIR)/u-boot.mk
+ include $(INCLUDE_DIR)/package.mk
+@@ -14,12 +15,42 @@ define U-Boot/Default
+   DEFAULT:=y
+ endef
+ 
+-define U-Boot/mt7622
+-  NAME:=MT7622
++define U-Boot/mt7622_rfb1
++  NAME:=MT7622 Reference Board 1
+   BUILD_SUBTARGET:=mt7622
+   UBOOT_CONFIG:=mt7622_rfb
+ endef
+ 
++define U-Boot/mt7622_linksys_e8450
++  NAME:=Linksys E8450
++  BUILD_SUBTARGET:=mt7622
++  UBOOT_CONFIG:=mt7622_linksys_e8450
++  UBOOT_IMAGE:=u-boot.fip
++  BL2_BOOTDEV:=snand
++  BL2_DDRBLOB:=1
++  DEPENDS:=+trusted-firmware-a-mt7622-snand-1ddr
++endef
++
++define U-Boot/mt7622_bananapi_bpi-r64-emmc
++  NAME:=BananaPi R64 (eMMC)
++  BUILD_SUBTARGET:=mt7622
++  UBOOT_CONFIG:=mt7622_bananapi_bpi-r64-emmc
++  UBOOT_IMAGE:=u-boot.fip
++  BL2_BOOTDEV:=emmc
++  BL2_DDRBLOB:=2
++  DEPENDS:=+trusted-firmware-a-mt7622-emmc-2ddr
++endef
++
++define U-Boot/mt7622_bananapi_bpi-r64-sdmmc
++  NAME:=BananaPi R64 (SDMMC)
++  BUILD_SUBTARGET:=mt7622
++  UBOOT_CONFIG:=mt7622_bananapi_bpi-r64-sdmmc
++  UBOOT_IMAGE:=u-boot.fip
++  BL2_BOOTDEV:=sdmmc
++  BL2_DDRBLOB:=2
++  DEPENDS:=+trusted-firmware-a-mt7622-sdmmc-2ddr
++endef
++
+ define U-Boot/mt7623a_unielec_u7623
+   NAME:=UniElec U7623 (mt7623)
+   BUILD_SUBTARGET:=mt7623
+@@ -39,15 +70,40 @@ define U-Boot/mt7629
+   UBOOT_CONFIG:=mt7629_rfb
+ endef
+ 
+-UBOOT_TARGETS := mt7629 mt7622 mt7623n_bpir2 mt7623a_unielec_u7623
++UBOOT_TARGETS := \
++	mt7629 \
++	mt7622_bananapi_bpi-r64-emmc \
++	mt7622_bananapi_bpi-r64-sdmmc \
++	mt7622_linksys_e8450 \
++	mt7622_rfb1 \
++	mt7623n_bpir2 \
++	mt7623a_unielec_u7623
+ 
+-UBOOT_MAKE_FLAGS += $(UBOOT_IMAGE)
++UBOOT_MAKE_FLAGS += $(UBOOT_IMAGE:.fip=.bin)
+ 
+ Build/Exports:=$(Host/Exports)
+ 
++define Build/fip-image
++	$(STAGING_DIR_HOST)/bin/fiptool create \
++		--soc-fw $(STAGING_DIR_IMAGE)/$(BUILD_SUBTARGET)-$(BL2_BOOTDEV)-$(BL2_DDRBLOB)ddr-bl31.bin \
++		--nt-fw $(PKG_BUILD_DIR)/u-boot.bin \
++		$(PKG_BUILD_DIR)/u-boot.fip
++endef
++
++define Build/Compile
++	$(call Build/Compile/U-Boot)
++ifeq ($(UBOOT_IMAGE),u-boot.fip))
++	$(call Build/fip-image)
++endif
++endef
++
++# don't stage files to bindir, let target/linux/mediatek/image/*.mk do that
++define Package/u-boot/install
++endef
++
+ define Build/InstallDev
+ 	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
+-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-$(UBOOT_IMAGE)
++	$(INSTALL_DATA) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-$(UBOOT_IMAGE)
+ endef
+ 
+ $(eval $(call BuildPackage/U-Boot))
+diff --git a/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch b/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch
+index dc3ebaf7af..5d3e94ac86 100644
+--- a/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch
++++ b/package/boot/uboot-mediatek/patches/002-nand-add-spi-nand-driver.patch
+@@ -85,11 +85,9 @@ Signed-off-by: Xiangsheng Hou <xiangsheng.hou@mediatek.com>
+  create mode 100644 drivers/mtd/nandx/include/internal/nandx_util.h
+  create mode 100644 drivers/mtd/nandx/include/uboot/nandx_os.h
+ 
+-diff --git a/drivers/mtd/Kconfig b/drivers/mtd/Kconfig
+-index 5e7571cf3d..34a59b44b9 100644
+ --- a/drivers/mtd/Kconfig
+ +++ b/drivers/mtd/Kconfig
+-@@ -101,6 +101,13 @@ config HBMC_AM654
++@@ -108,6 +108,13 @@ config HBMC_AM654
+  	 This is the driver for HyperBus controller on TI's AM65x and
+  	 other SoCs
+  
+@@ -103,11 +101,9 @@ index 5e7571cf3d..34a59b44b9 100644
+  source "drivers/mtd/nand/Kconfig"
+  
+  source "drivers/mtd/spi/Kconfig"
+-diff --git a/drivers/mtd/Makefile b/drivers/mtd/Makefile
+-index 318788c5e2..1df1031b23 100644
+ --- a/drivers/mtd/Makefile
+ +++ b/drivers/mtd/Makefile
+-@@ -41,3 +41,7 @@ obj-$(CONFIG_$(SPL_TPL_)SPI_FLASH_SUPPORT) += spi/
++@@ -41,3 +41,7 @@ obj-$(CONFIG_$(SPL_TPL_)SPI_FLASH_SUPPOR
+  obj-$(CONFIG_SPL_UBI) += ubispl/
+  
+  endif
+@@ -115,8 +111,6 @@ index 318788c5e2..1df1031b23 100644
+ +ifeq ($(CONFIG_MTK_SPI_NAND), y)
+ +include $(srctree)/drivers/mtd/nandx/Nandx.mk
+ +endif
+-diff --git a/drivers/mtd/nand/raw/nand.c b/drivers/mtd/nand/raw/nand.c
+-index 026419e4e6..4be0c7d8f3 100644
+ --- a/drivers/mtd/nand/raw/nand.c
+ +++ b/drivers/mtd/nand/raw/nand.c
+ @@ -91,8 +91,10 @@ static void nand_init_chip(int i)
+@@ -130,9 +124,6 @@ index 026419e4e6..4be0c7d8f3 100644
+  
+  	nand_register(i, mtd);
+  }
+-diff --git a/drivers/mtd/nandx/NOTICE b/drivers/mtd/nandx/NOTICE
+-new file mode 100644
+-index 0000000000..1a06ca3867
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/NOTICE
+ @@ -0,0 +1,52 @@
+@@ -189,9 +180,6 @@ index 0000000000..1a06ca3867
+ +
+ +####################################################################################################
+ \ No newline at end of file
+-diff --git a/drivers/mtd/nandx/Nandx.config b/drivers/mtd/nandx/Nandx.config
+-new file mode 100644
+-index 0000000000..35705ee28d
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/Nandx.config
+ @@ -0,0 +1,17 @@
+@@ -212,9 +200,6 @@ index 0000000000..35705ee28d
+ +NANDX_NFI_BASE := y
+ +NANDX_NFI_ECC := y
+ +NANDX_NFI_SPI := y
+-diff --git a/drivers/mtd/nandx/Nandx.mk b/drivers/mtd/nandx/Nandx.mk
+-new file mode 100644
+-index 0000000000..f5a6f2a628
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/Nandx.mk
+ @@ -0,0 +1,91 @@
+@@ -309,9 +294,6 @@ index 0000000000..f5a6f2a628
+ +clean:
+ +	rm -rf $(sim-obj) nandx
+ +endif
+-diff --git a/drivers/mtd/nandx/README b/drivers/mtd/nandx/README
+-new file mode 100644
+-index 0000000000..0feaeaeb88
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/README
+ @@ -0,0 +1,31 @@
+@@ -346,9 +328,6 @@ index 0000000000..0feaeaeb88
+ +    Any block of above graph can be extended at your will, if you
+ +want add new feature into this code, please make sure that your code
+ +would follow the framework, and we will be appreciated about it.
+-diff --git a/drivers/mtd/nandx/core/Nandx.mk b/drivers/mtd/nandx/core/Nandx.mk
+-new file mode 100644
+-index 0000000000..7a5661c044
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/Nandx.mk
+ @@ -0,0 +1,38 @@
+@@ -390,9 +369,6 @@ index 0000000000..7a5661c044
+ +nandx-header-$(NANDX_NFI_ECC) += nfi/nfiecc_regs.h
+ +nandx-header-$(NANDX_NFI_SPI) += nfi/nfi_spi.h
+ +nandx-header-$(NANDX_NFI_SPI) += nfi/nfi_spi_regs.h
+-diff --git a/drivers/mtd/nandx/core/core_io.c b/drivers/mtd/nandx/core/core_io.c
+-new file mode 100644
+-index 0000000000..716eeed38d
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/core_io.c
+ @@ -0,0 +1,735 @@
+@@ -1131,9 +1107,6 @@ index 0000000000..716eeed38d
+ +	return ret;
+ +}
+ +#endif
+-diff --git a/drivers/mtd/nandx/core/core_io.h b/drivers/mtd/nandx/core/core_io.h
+-new file mode 100644
+-index 0000000000..edcb60908a
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/core_io.h
+ @@ -0,0 +1,39 @@
+@@ -1176,9 +1149,6 @@ index 0000000000..edcb60908a
+ +};
+ +
+ +#endif /* __CORE_IO_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand/device_spi.c b/drivers/mtd/nandx/core/nand/device_spi.c
+-new file mode 100644
+-index 0000000000..db338c28c2
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/device_spi.c
+ @@ -0,0 +1,200 @@
+@@ -1382,9 +1352,6 @@ index 0000000000..db338c28c2
+ +	return &spi_nand[index].dev;
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nand/device_spi.h b/drivers/mtd/nandx/core/nand/device_spi.h
+-new file mode 100644
+-index 0000000000..1676b61fc8
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/device_spi.h
+ @@ -0,0 +1,132 @@
+@@ -1520,9 +1487,6 @@ index 0000000000..1676b61fc8
+ +u8 spi_replace_tx_col_cycle(u8 mode);
+ +
+ +#endif /* __DEVICE_SPI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand/nand_spi.c b/drivers/mtd/nandx/core/nand/nand_spi.c
+-new file mode 100644
+-index 0000000000..2ae03e1cf4
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/nand_spi.c
+ @@ -0,0 +1,526 @@
+@@ -2052,9 +2016,6 @@ index 0000000000..2ae03e1cf4
+ +	nand_base_exit(spi->parent);
+ +	mem_free(spi);
+ +}
+-diff --git a/drivers/mtd/nandx/core/nand/nand_spi.h b/drivers/mtd/nandx/core/nand/nand_spi.h
+-new file mode 100644
+-index 0000000000..e55e4de6f7
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand/nand_spi.h
+ @@ -0,0 +1,35 @@
+@@ -2093,9 +2054,6 @@ index 0000000000..e55e4de6f7
+ +}
+ +
+ +#endif /* __NAND_SPI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand_base.c b/drivers/mtd/nandx/core/nand_base.c
+-new file mode 100644
+-index 0000000000..65998e5460
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_base.c
+ @@ -0,0 +1,304 @@
+@@ -2403,9 +2361,6 @@ index 0000000000..65998e5460
+ +	nfi_exit(base->nfi);
+ +	mem_free(base);
+ +}
+-diff --git a/drivers/mtd/nandx/core/nand_base.h b/drivers/mtd/nandx/core/nand_base.h
+-new file mode 100644
+-index 0000000000..13217978e5
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_base.h
+ @@ -0,0 +1,71 @@
+@@ -2480,9 +2435,6 @@ index 0000000000..13217978e5
+ +int nand_detect_device(struct nand_base *nand);
+ +
+ +#endif /* __NAND_BASE_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand_chip.c b/drivers/mtd/nandx/core/nand_chip.c
+-new file mode 100644
+-index 0000000000..02adc6f52e
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_chip.c
+ @@ -0,0 +1,272 @@
+@@ -2758,9 +2710,6 @@ index 0000000000..02adc6f52e
+ +	nand_exit(chip->nand);
+ +	mem_free(chip);
+ +}
+-diff --git a/drivers/mtd/nandx/core/nand_chip.h b/drivers/mtd/nandx/core/nand_chip.h
+-new file mode 100644
+-index 0000000000..3e9c8e6ca3
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_chip.h
+ @@ -0,0 +1,103 @@
+@@ -2867,9 +2816,6 @@ index 0000000000..3e9c8e6ca3
+ +struct nand_chip *nand_chip_init(struct nfi_resource *res);
+ +void nand_chip_exit(struct nand_chip *chip);
+ +#endif /* __NAND_CHIP_H__ */
+-diff --git a/drivers/mtd/nandx/core/nand_device.c b/drivers/mtd/nandx/core/nand_device.c
+-new file mode 100644
+-index 0000000000..9f6764d1bc
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_device.c
+ @@ -0,0 +1,285 @@
+@@ -3158,9 +3104,6 @@ index 0000000000..9f6764d1bc
+ +	return 0;
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nand_device.h b/drivers/mtd/nandx/core/nand_device.h
+-new file mode 100644
+-index 0000000000..e142cf529d
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nand_device.h
+ @@ -0,0 +1,608 @@
+@@ -3772,9 +3715,6 @@ index 0000000000..e142cf529d
+ +
+ +struct nand_device *nand_get_device(int index);
+ +#endif /* __NAND_DEVICE_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi.h b/drivers/mtd/nandx/core/nfi.h
+-new file mode 100644
+-index 0000000000..ba84e73ccc
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi.h
+ @@ -0,0 +1,51 @@
+@@ -3829,9 +3769,6 @@ index 0000000000..ba84e73ccc
+ +void nfi_exit(struct nfi *nfi);
+ +
+ +#endif /* __NFI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_base.c b/drivers/mtd/nandx/core/nfi/nfi_base.c
+-new file mode 100644
+-index 0000000000..d8679d7aa3
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_base.c
+ @@ -0,0 +1,1357 @@
+@@ -5192,9 +5129,6 @@ index 0000000000..d8679d7aa3
+ +	nfi_extend_exit(nb);
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_base.h b/drivers/mtd/nandx/core/nfi/nfi_base.h
+-new file mode 100644
+-index 0000000000..ae894eaa31
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_base.h
+ @@ -0,0 +1,95 @@
+@@ -5293,9 +5227,6 @@ index 0000000000..ae894eaa31
+ +void nfi_extend_exit(struct nfi_base *nb);
+ +
+ +#endif /* __NFI_BASE_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_regs.h b/drivers/mtd/nandx/core/nfi/nfi_regs.h
+-new file mode 100644
+-index 0000000000..ba4868acc8
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_regs.h
+ @@ -0,0 +1,114 @@
+@@ -5413,9 +5344,6 @@ index 0000000000..ba4868acc8
+ +
+ +#endif /* __NFI_REGS_H__ */
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_spi.c b/drivers/mtd/nandx/core/nfi/nfi_spi.c
+-new file mode 100644
+-index 0000000000..67cd0aaad9
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_spi.c
+ @@ -0,0 +1,689 @@
+@@ -6108,9 +6036,6 @@ index 0000000000..67cd0aaad9
+ +	mem_free(nfi_spi);
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_spi.h b/drivers/mtd/nandx/core/nfi/nfi_spi.h
+-new file mode 100644
+-index 0000000000..a52255663a
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_spi.h
+ @@ -0,0 +1,44 @@
+@@ -6158,9 +6083,6 @@ index 0000000000..a52255663a
+ +};
+ +
+ +#endif /* __NFI_SPI_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfi_spi_regs.h b/drivers/mtd/nandx/core/nfi/nfi_spi_regs.h
+-new file mode 100644
+-index 0000000000..77adf46782
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfi_spi_regs.h
+ @@ -0,0 +1,64 @@
+@@ -6228,9 +6150,6 @@ index 0000000000..77adf46782
+ +#define SPI_GPRAM_ADDR          0x800
+ +
+ +#endif /* __NFI_SPI_REGS_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfiecc.c b/drivers/mtd/nandx/core/nfi/nfiecc.c
+-new file mode 100644
+-index 0000000000..14246fbc3e
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfiecc.c
+ @@ -0,0 +1,510 @@
+@@ -6744,9 +6663,6 @@ index 0000000000..14246fbc3e
+ +	mem_free(ecc);
+ +}
+ +
+-diff --git a/drivers/mtd/nandx/core/nfi/nfiecc.h b/drivers/mtd/nandx/core/nfi/nfiecc.h
+-new file mode 100644
+-index 0000000000..b02a5c3534
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfiecc.h
+ @@ -0,0 +1,90 @@
+@@ -6840,9 +6756,6 @@ index 0000000000..b02a5c3534
+ +void nfiecc_exit(struct nfiecc *ecc);
+ +
+ +#endif /* __NFIECC_H__ */
+-diff --git a/drivers/mtd/nandx/core/nfi/nfiecc_regs.h b/drivers/mtd/nandx/core/nfi/nfiecc_regs.h
+-new file mode 100644
+-index 0000000000..96564cf872
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/core/nfi/nfiecc_regs.h
+ @@ -0,0 +1,51 @@
+@@ -6897,9 +6810,6 @@ index 0000000000..96564cf872
+ +#define NFIECC_DECEL(x)         (0x120 + (x) * 4)
+ +
+ +#endif /* __NFIECC_REGS_H__ */
+-diff --git a/drivers/mtd/nandx/driver/Nandx.mk b/drivers/mtd/nandx/driver/Nandx.mk
+-new file mode 100644
+-index 0000000000..3fb93d37c5
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/driver/Nandx.mk
+ @@ -0,0 +1,18 @@
+@@ -6921,9 +6831,6 @@ index 0000000000..3fb93d37c5
+ +nandx-$(NANDX_KERNEL_SUPPORT) += kernel/driver.c
+ +nandx-$(NANDX_LK_SUPPORT) += lk/driver.c
+ +nandx-$(NANDX_UBOOT_SUPPORT) += uboot/driver.c
+-diff --git a/drivers/mtd/nandx/driver/bbt/bbt.c b/drivers/mtd/nandx/driver/bbt/bbt.c
+-new file mode 100644
+-index 0000000000..c9d4823e09
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/driver/bbt/bbt.c
+ @@ -0,0 +1,408 @@
+@@ -7335,9 +7242,6 @@ index 0000000000..c9d4823e09
+ +
+ +	return get_bbt_mark(g_bbt_manager.bbt, block) != BBT_BLOCK_GOOD;
+ +}
+-diff --git a/drivers/mtd/nandx/driver/uboot/driver.c b/drivers/mtd/nandx/driver/uboot/driver.c
+-new file mode 100644
+-index 0000000000..7bd3342452
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/driver/uboot/driver.c
+ @@ -0,0 +1,574 @@
+@@ -7915,9 +7819,6 @@ index 0000000000..7bd3342452
+ +MODULE_LICENSE("GPL v2");
+ +MODULE_DESCRIPTION("MTK Nand Flash Controller Driver");
+ +MODULE_AUTHOR("MediaTek");
+-diff --git a/drivers/mtd/nandx/include/Nandx.mk b/drivers/mtd/nandx/include/Nandx.mk
+-new file mode 100644
+-index 0000000000..667402790e
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/Nandx.mk
+ @@ -0,0 +1,16 @@
+@@ -7937,9 +7838,6 @@ index 0000000000..667402790e
+ +nandx-header-$(NANDX_LK_SUPPORT) += lk/nandx_os.h
+ +nandx-header-$(NANDX_KERNEL_SUPPORT) += kernel/nandx_os.h
+ +nandx-header-$(NANDX_UBOOT_SUPPORT) += uboot/nandx_os.h
+-diff --git a/drivers/mtd/nandx/include/internal/bbt.h b/drivers/mtd/nandx/include/internal/bbt.h
+-new file mode 100644
+-index 0000000000..4676def1f5
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/bbt.h
+ @@ -0,0 +1,62 @@
+@@ -8005,9 +7903,6 @@ index 0000000000..4676def1f5
+ +int bbt_is_bad(struct nandx_info *nand, off_t offset);
+ +
+ +#endif /*__BBT_H__*/
+-diff --git a/drivers/mtd/nandx/include/internal/nandx_core.h b/drivers/mtd/nandx/include/internal/nandx_core.h
+-new file mode 100644
+-index 0000000000..09aff72224
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/nandx_core.h
+ @@ -0,0 +1,250 @@
+@@ -8261,9 +8156,6 @@ index 0000000000..09aff72224
+ +#endif
+ +
+ +#endif /* __NANDX_CORE_H__ */
+-diff --git a/drivers/mtd/nandx/include/internal/nandx_errno.h b/drivers/mtd/nandx/include/internal/nandx_errno.h
+-new file mode 100644
+-index 0000000000..51fb299c03
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/nandx_errno.h
+ @@ -0,0 +1,40 @@
+@@ -8307,9 +8199,6 @@ index 0000000000..51fb299c03
+ +#endif
+ +
+ +#endif /* __NANDX_ERRNO_H__ */
+-diff --git a/drivers/mtd/nandx/include/internal/nandx_util.h b/drivers/mtd/nandx/include/internal/nandx_util.h
+-new file mode 100644
+-index 0000000000..1990b000ee
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/internal/nandx_util.h
+ @@ -0,0 +1,221 @@
+@@ -8534,9 +8423,6 @@ index 0000000000..1990b000ee
+ +}
+ +
+ +#endif /* __NANDX_UTIL_H__ */
+-diff --git a/drivers/mtd/nandx/include/uboot/nandx_os.h b/drivers/mtd/nandx/include/uboot/nandx_os.h
+-new file mode 100644
+-index 0000000000..8ea53378bf
+ --- /dev/null
+ +++ b/drivers/mtd/nandx/include/uboot/nandx_os.h
+ @@ -0,0 +1,78 @@
+@@ -8618,8 +8504,6 @@ index 0000000000..8ea53378bf
+ +}
+ +
+ +#endif /* __NANDX_OS_H__ */
+-diff --git a/include/configs/mt7622.h b/include/configs/mt7622.h
+-index dfd506ed24..6d0c956484 100644
+ --- a/include/configs/mt7622.h
+ +++ b/include/configs/mt7622.h
+ @@ -11,6 +11,31 @@
+@@ -8654,6 +8538,3 @@ index dfd506ed24..6d0c956484 100644
+  #define CONFIG_SYS_MAXARGS		8
+  #define CONFIG_SYS_BOOTM_LEN		SZ_64M
+  #define CONFIG_SYS_CBSIZE		SZ_1K
+--- 
+-2.17.1
+-
+diff --git a/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch b/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch
+index 2c021e1c80..7167a498ad 100644
+--- a/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch
++++ b/package/boot/uboot-mediatek/patches/003-mt7622-uboot-add-dts-and-config-for-spi-nand.patch
+@@ -11,11 +11,9 @@ Signed-off-by: Xiangsheng Hou <xiangsheng.hou@mediatek.com>
+  arch/arm/dts/mt7622.dtsi    | 20 ++++++++++++++++++++
+  2 files changed, 26 insertions(+)
+ 
+-diff --git a/arch/arm/dts/mt7622-rfb.dts b/arch/arm/dts/mt7622-rfb.dts
+-index f05c3fe14d..05502bddec 100644
+ --- a/arch/arm/dts/mt7622-rfb.dts
+ +++ b/arch/arm/dts/mt7622-rfb.dts
+-@@ -143,6 +143,12 @@
++@@ -174,6 +174,12 @@
+  	};
+  };
+  
+@@ -28,11 +26,9 @@ index f05c3fe14d..05502bddec 100644
+  &uart0 {
+  	pinctrl-names = "default";
+  	pinctrl-0 = <&uart0_pins>;
+-diff --git a/arch/arm/dts/mt7622.dtsi b/arch/arm/dts/mt7622.dtsi
+-index 1e8ec9b48b..63fdb63d4a 100644
+ --- a/arch/arm/dts/mt7622.dtsi
+ +++ b/arch/arm/dts/mt7622.dtsi
+-@@ -52,6 +52,26 @@
++@@ -53,6 +53,26 @@
+  		#size-cells = <0>;
+  	};
+  
+@@ -59,6 +55,3 @@ index 1e8ec9b48b..63fdb63d4a 100644
+  	timer {
+  		compatible = "arm,armv8-timer";
+  		interrupt-parent = <&gic>;
+--- 
+-2.17.1
+-
+diff --git a/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch b/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch
+index cb564965c7..6999e5e235 100644
+--- a/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch
++++ b/package/boot/uboot-mediatek/patches/004-configs-enable-mtd-and-mtk_spi_nand-in-defconfig.patch
+@@ -10,8 +10,6 @@ Signed-off-by: Sam Shih <sam.shih@mediatek.com>
+  configs/mt7622_rfb_defconfig | 5 +++++
+  1 file changed, 5 insertions(+)
+ 
+-diff --git a/configs/mt7622_rfb_defconfig b/configs/mt7622_rfb_defconfig
+-index 1ce6ebdfeb..816126267b 100644
+ --- a/configs/mt7622_rfb_defconfig
+ +++ b/configs/mt7622_rfb_defconfig
+ @@ -13,6 +13,7 @@ CONFIG_DEFAULT_FDT_FILE="mt7622-rfb"
+@@ -22,18 +20,3 @@ index 1ce6ebdfeb..816126267b 100644
+  CONFIG_CMD_PCI=y
+  CONFIG_CMD_SF_TEST=y
+  CONFIG_CMD_PING=y
+- CONFIG_CMD_SMC=y
+-@@ -25,6 +26,10 @@ CONFIG_CLK=y
+- CONFIG_DM_MMC=y
+- CONFIG_MMC_HS200_SUPPORT=y
+- CONFIG_MMC_MTK=y
+-+CONFIG_MTD=y
+-+CONFIG_DM_MTD=y
+-+CONFIG_MTK_SPI_NAND=y
+-+CONFIG_MTD_RAW_NAND=y
+- CONFIG_DM_SPI_FLASH=y
+- CONFIG_SPI_FLASH_EON=y
+- CONFIG_SPI_FLASH_GIGADEVICE=y
+--- 
+-2.17.1
+-
+diff --git a/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch b/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch
+index cc7ed89280..b750dda6e8 100644
+--- a/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch
++++ b/package/boot/uboot-mediatek/patches/005-update-bpir2-defconfig.patch
+@@ -1,10 +1,9 @@
+-diff --git a/configs/mt7623n_bpir2_defconfig b/configs/mt7623n_bpir2_defconfig
+-index 6b9fbd7e22..fb2a004803 100644
+ --- a/configs/mt7623n_bpir2_defconfig
+ +++ b/configs/mt7623n_bpir2_defconfig
+-@@ -52,3 +52,13 @@ CONFIG_TIMER=y
+- CONFIG_WDT_MTK=y
+- CONFIG_LZMA=y
++@@ -51,5 +51,15 @@ CONFIG_SYSRESET=y
++ CONFIG_SYSRESET_WATCHDOG=y
++ CONFIG_TIMER=y
++ CONFIG_MTK_TIMER=y
+ +CONFIG_CMD_BOOTZ=y
+ +CONFIG_OF_LIBFDT_OVERLAY=y
+ +#enables savenenv-command
+@@ -15,3 +14,5 @@ index 6b9fbd7e22..fb2a004803 100644
+ +CONFIG_CMD_ASKENV=y
+ +CONFIG_ENV_SIZE=0x2000
+ +CONFIG_CMD_SETEXPR=y
++ CONFIG_WDT_MTK=y
++ CONFIG_LZMA=y
+diff --git a/package/boot/uboot-mediatek/patches/006-cmd-button-return-button-status.patch b/package/boot/uboot-mediatek/patches/006-cmd-button-return-button-status.patch
+new file mode 100644
+index 0000000000..a413688f1c
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/006-cmd-button-return-button-status.patch
+@@ -0,0 +1,38 @@
++From a6bfd71a96201127836d59736abcb54dc2d5e1a5 Mon Sep 17 00:00:00 2001
++From: Heinrich Schuchardt <xypron.glpk@gmx.de>
++Date: Mon, 14 Sep 2020 12:50:56 +0200
++Subject: [PATCH] cmd/button: return button status
++
++To make the button command useful in a shell script it should return the
++status of the button:
++
++* 0 (true) - pressed, on
++* 1 (false) - not pressed, off
++
++The button command takes only one argument. Correct maxargs.
++
++Adjust the Python unit test.
++
++Signed-off-by: Heinrich Schuchardt <xypron.glpk@gmx.de>
++Reviewed-by: Philippe Reynes <philippe.reynes@softathome.com>
++---
++ cmd/button.c                 |  4 ++--
++ test/py/tests/test_button.py | 34 ++++++++++++++++++++++++++--------
++ 2 files changed, 28 insertions(+), 10 deletions(-)
++
++--- a/cmd/button.c
+++++ b/cmd/button.c
++@@ -75,11 +75,11 @@ int do_button(struct cmd_tbl *cmdtp, int
++ 
++ 	ret = show_button_state(dev);
++ 
++-	return 0;
+++	return !ret;
++ }
++ 
++ U_BOOT_CMD(
++-	button, 4, 1, do_button,
+++	button, 2, 1, do_button,
++ 	"manage buttons",
++ 	"<button_label> \tGet button state\n"
++ 	"button list\t\tShow a list of buttons"
+diff --git a/package/boot/uboot-mediatek/patches/007-env-readmem.patch b/package/boot/uboot-mediatek/patches/007-env-readmem.patch
+new file mode 100644
+index 0000000000..a8c88a2757
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/007-env-readmem.patch
+@@ -0,0 +1,116 @@
++--- a/cmd/Kconfig
+++++ b/cmd/Kconfig
++@@ -571,6 +571,12 @@ config CMD_ENV_EXISTS
++ 	  Check if a variable is defined in the environment for use in
++ 	  shell scripting.
++ 
+++config CMD_ENV_READMEM
+++	bool "env readmem"
+++	default y
+++	help
+++	  Store memory content into environment variable.
+++
++ config CMD_ENV_CALLBACK
++ 	bool "env callbacks - print callbacks and their associated variables"
++ 	help
++--- a/cmd/nvedit.c
+++++ b/cmd/nvedit.c
++@@ -469,6 +469,60 @@ int do_env_ask(struct cmd_tbl *cmdtp, in
++ }
++ #endif
++ 
+++#if defined(CONFIG_CMD_ENV_READMEM)
+++int do_env_readmem(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+++{
+++	char varstr[CONFIG_SYS_CBSIZE];
+++	const void *buf;
+++	char *local_args[4];
+++	ulong addr, bytes = 6;
+++	int hexdump = 0;
+++
+++	/*
+++	 * Check the syntax:
+++	 *
+++	 * readmem [-b] name address [size]
+++	 */
+++	if (argc < 3)
+++		return CMD_RET_USAGE;
+++
+++	local_args[0] = argv[0];
+++
+++	if (!strncmp(argv[1], "-b", 3))
+++		hexdump = 1;
+++
+++	local_args[1] = argv[hexdump + 1];
+++	local_args[2] = varstr;
+++	local_args[3] = NULL;
+++
+++	addr = simple_strtoul(argv[hexdump + 2], NULL, 16);
+++
+++	if (!hexdump)
+++		bytes = simple_strtoul(argv[hexdump + 3], NULL, 16);
+++
+++	if (bytes < 1)
+++		return 1;
+++
+++	if ((hexdump * 3) * bytes >= CONFIG_SYS_CBSIZE)
+++		return 1;
+++
+++	buf = map_sysmem(addr, bytes);
+++	if (!buf)
+++		return 1;
+++
+++	if (hexdump) {
+++		sprintf(varstr, "%pM", buf);
+++	} else {
+++		memcpy(varstr, buf, bytes);
+++		varstr[bytes] = '\0';
+++	}
+++	unmap_sysmem(buf);
+++
+++	/* Continue calling setenv code */
+++	return _do_env_set(flag, 3, local_args, H_INTERACTIVE);
+++}
+++#endif
+++
++ #if defined(CONFIG_CMD_ENV_CALLBACK)
++ static int print_static_binding(const char *var_name, const char *callback_name,
++ 				void *priv)
++@@ -1373,6 +1427,9 @@ static struct cmd_tbl cmd_env_sub[] = {
++ 	U_BOOT_CMD_MKENT(load, 1, 0, do_env_load, "", ""),
++ #endif
++ 	U_BOOT_CMD_MKENT(print, CONFIG_SYS_MAXARGS, 1, do_env_print, "", ""),
+++#if defined(CONFIG_CMD_ENV_READMEM)
+++	U_BOOT_CMD_MKENT(readmem, CONFIG_SYS_MAXARGS, 3, do_env_readmem, "", ""),
+++#endif
++ #if defined(CONFIG_CMD_RUN)
++ 	U_BOOT_CMD_MKENT(run, CONFIG_SYS_MAXARGS, 1, do_run, "", ""),
++ #endif
++@@ -1461,6 +1518,9 @@ static char env_help_text[] =
++ #if defined(CONFIG_CMD_NVEDIT_EFI)
++ 	"env print -e [-guid guid] [-n] [name ...] - print UEFI environment\n"
++ #endif
+++#if defined(CONFIG_CMD_ENV_READMEM)
+++	"env readmem [-b] name address size - read variable from memory\n"
+++#endif
++ #if defined(CONFIG_CMD_RUN)
++ 	"env run var [...] - run commands in an environment variable\n"
++ #endif
++@@ -1570,6 +1630,17 @@ U_BOOT_CMD(
++ );
++ #endif
++ 
+++#if defined(CONFIG_CMD_ENV_READMEM)
+++U_BOOT_CMD_COMPLETE(
+++	readmem,	CONFIG_SYS_MAXARGS,	3,	do_env_readmem,
+++	"get environment variable from memory address",
+++	"name [-b] address size\n"
+++	"    - store memory address to env variable\n"
+++	"      \"-b\": read binary ethaddr",
+++	var_complete
+++);
+++#endif
+++
++ #if defined(CONFIG_CMD_RUN)
++ U_BOOT_CMD_COMPLETE(
++ 	run,	CONFIG_SYS_MAXARGS,	1,	do_run,
+diff --git a/package/boot/uboot-mediatek/patches/008-bootmenu-custom-title.patch b/package/boot/uboot-mediatek/patches/008-bootmenu-custom-title.patch
+new file mode 100644
+index 0000000000..32f26ece8e
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/008-bootmenu-custom-title.patch
+@@ -0,0 +1,32 @@
++--- a/cmd/bootmenu.c
+++++ b/cmd/bootmenu.c
++@@ -38,6 +38,7 @@ struct bootmenu_data {
++ 	int active;			/* active menu entry */
++ 	int count;			/* total count of menu entries */
++ 	struct bootmenu_entry *first;	/* first menu entry */
+++	char *mtitle;			/* custom menu title */
++ };
++ 
++ enum bootmenu_key {
++@@ -380,7 +381,12 @@ static void menu_display_statusline(stru
++ 	printf(ANSI_CURSOR_POSITION, 1, 1);
++ 	puts(ANSI_CLEAR_LINE);
++ 	printf(ANSI_CURSOR_POSITION, 2, 1);
++-	puts("  *** U-Boot Boot Menu ***");
+++
+++	if (menu->mtitle)
+++		puts(menu->mtitle);
+++	else
+++		puts("  *** U-Boot Boot Menu ***");
+++
++ 	puts(ANSI_CLEAR_LINE_TO_END);
++ 	printf(ANSI_CURSOR_POSITION, 3, 1);
++ 	puts(ANSI_CLEAR_LINE);
++@@ -434,6 +440,7 @@ static void bootmenu_show(int delay)
++ 		return;
++ 	}
++ 
+++	bootmenu->mtitle = env_get("bootmenu_title");
++ 	for (iter = bootmenu->first; iter; iter = iter->next) {
++ 		if (!menu_item_add(menu, iter->key, iter))
++ 			goto cleanup;
+diff --git a/package/boot/uboot-mediatek/patches/009-mt7622-generic-reset-button-ignore-env.patch b/package/boot/uboot-mediatek/patches/009-mt7622-generic-reset-button-ignore-env.patch
+new file mode 100644
+index 0000000000..037bbb89ea
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/009-mt7622-generic-reset-button-ignore-env.patch
+@@ -0,0 +1,35 @@
++--- a/board/mediatek/mt7622/mt7622_rfb.c
+++++ b/board/mediatek/mt7622/mt7622_rfb.c
++@@ -6,9 +6,15 @@
++ 
++ #include <common.h>
++ #include <config.h>
+++#include <dm.h>
+++#include <button.h>
++ #include <env.h>
++ #include <init.h>
++ 
+++#ifndef CONFIG_RESET_BUTTON_LABEL
+++#define CONFIG_RESET_BUTTON_LABEL "reset"
+++#endif
+++
++ DECLARE_GLOBAL_DATA_PTR;
++ 
++ int board_init(void)
++@@ -19,7 +25,15 @@ int board_init(void)
++ 
++ int board_late_init(void)
++ {
++-	gd->env_valid = 1; //to load environment variable from persistent store
+++	struct udevice *dev;
+++	int ret;
+++
+++	ret = !!button_get_by_label(CONFIG_RESET_BUTTON_LABEL, &dev);
+++
+++	if (!ret)
+++		ret = !button_get_state(dev);
+++
+++	gd->env_valid = ret; //to load environment variable from persistent store
++ 	env_relocate();
++ 	return 0;
++ }
+diff --git a/package/boot/uboot-mediatek/patches/010-no-binman.patch b/package/boot/uboot-mediatek/patches/010-no-binman.patch
+index a2680e56fd..7071a6c410 100644
+--- a/package/boot/uboot-mediatek/patches/010-no-binman.patch
++++ b/package/boot/uboot-mediatek/patches/010-no-binman.patch
+@@ -1,6 +1,6 @@
+---- a/Makefile	2020-10-13 13:39:06.471438591 +0800
+-+++ b/Makefile	2020-10-13 13:39:39.190798462 +0800
+-@@ -1725,6 +1725,10 @@
++--- a/Makefile
+++++ b/Makefile
++@@ -1716,6 +1716,10 @@ u-boot-elf.lds: arch/u-boot-elf.lds prep
+  
+  ifeq ($(CONFIG_SPL),y)
+  spl/u-boot-spl-mtk.bin: spl/u-boot-spl
+diff --git a/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch b/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch
+index ec189f82dc..37d1b6a671 100644
+--- a/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch
++++ b/package/boot/uboot-mediatek/patches/010-update-u7623-defconfig.patch
+@@ -1,5 +1,3 @@
+-diff --git a/configs/mt7623n_bpir2_defconfig b/configs/mt7623n_bpir2_defconfig
+-index 6b9fbd7e22..fb2a004803 100644
+ --- a/configs/mt7623a_unielec_u7623_02_defconfig
+ +++ b/configs/mt7623a_unielec_u7623_02_defconfig
+ @@ -52,3 +52,12 @@ CONFIG_TIMER=y
+diff --git a/package/boot/uboot-mediatek/patches/015-update-bananapi-bpi-r64-device-tree.patch b/package/boot/uboot-mediatek/patches/015-update-bananapi-bpi-r64-device-tree.patch
+new file mode 100644
+index 0000000000..8010107a65
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/015-update-bananapi-bpi-r64-device-tree.patch
+@@ -0,0 +1,95 @@
++--- a/arch/arm/dts/mt7622-bananapi-bpi-r64.dts
+++++ b/arch/arm/dts/mt7622-bananapi-bpi-r64.dts
++@@ -27,6 +27,42 @@
++ 		reg = <0x40000000 0x40000000>;
++ 	};
++ 
+++	gpio-keys {
+++		compatible = "gpio-keys";
+++
+++		reset {
+++			label = "reset";
+++			gpios = <&gpio 0 GPIO_ACTIVE_LOW>;
+++		};
+++
+++		wps {
+++			label = "wps";
+++			gpios = <&gpio 102 GPIO_ACTIVE_LOW>;
+++		};
+++	};
+++
+++	leds {
+++		compatible = "gpio-leds";
+++/*
+++ *		red {
+++ *			label = "bpi-r64:pio:red";
+++ *			gpios = <&gpio 88 GPIO_ACTIVE_HIGH>;
+++ *			default-state = "off";
+++ *		};
+++ */
+++		green {
+++			label = "bpi-r64:pio:green";
+++			gpios = <&gpio 89 GPIO_ACTIVE_HIGH>;
+++			default-state = "off";
+++		};
+++
+++		blue {
+++			label = "bpi-r64:pio:blue";
+++			gpios = <&gpio 85 GPIO_ACTIVE_LOW>;
+++			default-state = "off";
+++		};
+++	};
+++
++ 	reg_1p8v: regulator-1p8v {
++ 		compatible = "regulator-fixed";
++ 		regulator-name = "fixed-1.8V";
++@@ -139,11 +163,12 @@
++ 
++ 	};
++ 
++-	mmc1_pins_default: mmc1default {
+++	sd0_pins_default: sd0-pins-default {
++ 		mux {
++ 			function = "sd";
++-			groups =  "sd_0";
+++			groups = "sd_0";
++ 		};
+++
++ 		/* "I2S2_OUT, "I2S4_IN"", "I2S3_IN", "I2S2_IN",
++ 		 *  "I2S4_OUT", "I2S3_OUT" are used as DAT0, DAT1,
++ 		 *  DAT2, DAT3, CMD, CLK for SD respectively.
++@@ -164,7 +189,6 @@
++ 			pins = "TXD3";
++ 			bias-pull-up;
++ 		};
++-
++ 	};
++ };
++ 
++@@ -199,7 +223,7 @@
++ 	status = "okay";
++ 	bus-width = <8>;
++ 	max-frequency = <50000000>;
++-	cap-sd-highspeed;
+++	cap-mmc-highspeed;
++ 	vmmc-supply = <&reg_3p3v>;
++ 	vqmmc-supply = <&reg_3p3v>;
++ 	non-removable;
++@@ -207,14 +231,15 @@
++ 
++ &mmc1 {
++ 	pinctrl-names = "default";
++-	pinctrl-0 = <&mmc1_pins_default>;
+++	pinctrl-0 = <&sd0_pins_default>;
++ 	status = "okay";
++ 	bus-width = <4>;
++-	max-frequency = <50000000>;
+++	max-frequency = <20000000>;
++ 	cap-sd-highspeed;
++ 	r_smpl = <1>;
++ 	vmmc-supply = <&reg_3p3v>;
++ 	vqmmc-supply = <&reg_3p3v>;
+++	cd-gpios = <&gpio 81 GPIO_ACTIVE_LOW>;
++ };
++ 
++ &watchdog {
+diff --git a/package/boot/uboot-mediatek/patches/016-fit-totalsize.patch b/package/boot/uboot-mediatek/patches/016-fit-totalsize.patch
+new file mode 100644
+index 0000000000..72fb4ac516
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/016-fit-totalsize.patch
+@@ -0,0 +1,132 @@
++--- a/cmd/bootm.c
+++++ b/cmd/bootm.c
++@@ -227,6 +227,65 @@ U_BOOT_CMD(
++ /* iminfo - print header info for a requested image */
++ /*******************************************************************/
++ #if defined(CONFIG_CMD_IMI)
+++#define SECTOR_SHIFT 9
+++static int image_totalsize(struct cmd_tbl *cmdtp, int flag, int argc,
+++			   char *const argv[], short int in_blocks)
+++{
+++	ulong addr;
+++	void *fit;
+++	int bsize, tsize, maxhdrsize;
+++	char buf[16];
+++
+++	if (argc >= 2)
+++		addr = simple_strtoul(argv[1], NULL, 16);
+++	else
+++		addr = image_load_addr;
+++
+++	fit = (void *)map_sysmem(addr, 0);
+++	tsize = fit_get_totalsize(fit);
+++	unmap_sysmem(fit);
+++	if (tsize == 0)
+++		return 1;
+++
+++	bsize = (tsize >> SECTOR_SHIFT) + ((tsize & ((1 << SECTOR_SHIFT) - 1))?1:0);
+++
+++	if (!in_blocks)
+++		snprintf(buf, sizeof(buf), "%x", tsize);
+++	else
+++		snprintf(buf, sizeof(buf), "%x", bsize);
+++
+++	if (argc >= 3)
+++		return env_set(argv[2], buf);
+++	else
+++		printf("%s\n", buf);
+++
+++	return 0;
+++}
+++
+++static int do_imsz(struct cmd_tbl *cmdtp, int flag, int argc,
+++		     char *const argv[])
+++{
+++	return image_totalsize(cmdtp, flag, argc, argv, 0);
+++}
+++
+++static int do_imszb(struct cmd_tbl *cmdtp, int flag, int argc,
+++		     char *const argv[])
+++{
+++	return image_totalsize(cmdtp, flag, argc, argv, 1);
+++}
+++
+++U_BOOT_CMD(
+++	imsz,	CONFIG_SYS_MAXARGS,	1,	do_imsz,
+++	"get image total size (in bytes)",
+++	"addr [maxhdrlen] [varname]\n"
+++);
+++
+++U_BOOT_CMD(
+++	imszb,	CONFIG_SYS_MAXARGS,	1,	do_imszb,
+++	"get image total size (in blocks)",
+++	"addr [maxhdrlen] [varname]\n"
+++);
+++
++ static int do_iminfo(struct cmd_tbl *cmdtp, int flag, int argc,
++ 		     char *const argv[])
++ {
++--- a/common/image-fit.c
+++++ b/common/image-fit.c
++@@ -1878,6 +1878,51 @@ static const char *fit_get_image_type_pr
++ 	return "unknown";
++ }
++ 
+++size_t fit_get_totalsize(const void *fit)
+++{
+++	int ret, ndepth, noffset, images_noffset;
+++	size_t data_size, hdrsize, img_total, max_size = 0;
+++	const void *data;
+++
+++	ret = fdt_check_header(fit);
+++	if (ret) {
+++		debug("Wrong FIT format: not a flattened device tree (err=%d)\n",
+++			  ret);
+++		return 0;
+++	}
+++
+++	hdrsize = fdt_totalsize(fit);
+++
+++	/* simple FIT with internal images */
+++	if (hdrsize > 0x1000)
+++		return hdrsize;
+++
+++	images_noffset = fdt_path_offset(fit, FIT_IMAGES_PATH);
+++	if (images_noffset < 0) {
+++		printf("Can't find images parent node '%s' (%s)\n",
+++		FIT_IMAGES_PATH, fdt_strerror(images_noffset));
+++		return 0;
+++	}
+++
+++	for (ndepth = 0,
+++	     noffset = fdt_next_node(fit, images_noffset, &ndepth);
+++	     (noffset >= 0) && (ndepth > 0);
+++	     noffset = fdt_next_node(fit, noffset, &ndepth)) {
+++		if (ndepth == 1) {
+++			ret = fit_image_get_data_and_size(fit, noffset, &data, &data_size);
+++			if (ret)
+++				return 0;
+++
+++			img_total = data_size + (data - fit);
+++
+++			max_size = (max_size > img_total) ? max_size : img_total;
+++		}
+++	}
+++
+++	return max_size;
+++}
+++
+++
++ int fit_image_load(bootm_headers_t *images, ulong addr,
++ 		   const char **fit_unamep, const char **fit_uname_configp,
++ 		   int arch, int image_type, int bootstage_id,
++--- a/include/image.h
+++++ b/include/image.h
++@@ -1027,6 +1027,7 @@ int fit_parse_subimage(const char *spec,
++ 		ulong *addr, const char **image_name);
++ 
++ int fit_get_subimage_count(const void *fit, int images_noffset);
+++size_t fit_get_totalsize(const void *fit);
++ void fit_print_contents(const void *fit);
++ void fit_image_print(const void *fit, int noffset, const char *p);
++ 
+diff --git a/package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch b/package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch
+new file mode 100644
+index 0000000000..6469845d12
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/017-add-bananapi_bpi-r64_defconfigs.patch
+@@ -0,0 +1,355 @@
++--- /dev/null
+++++ b/configs/mt7622_bananapi_bpi-r64-sdmmc_defconfig
++@@ -0,0 +1,123 @@
+++CONFIG_ARM=y
+++CONFIG_POSITION_INDEPENDENT=y
+++CONFIG_ARCH_MEDIATEK=y
+++CONFIG_SYS_TEXT_BASE=0x41e00000
+++CONFIG_SYS_MALLOC_F_LEN=0x4000
+++CONFIG_USE_DEFAULT_ENV_FILE=y
+++CONFIG_BOARD_LATE_INIT=y
+++CONFIG_BOOTP_SEND_HOSTNAME=y
+++CONFIG_NR_DRAM_BANKS=1
+++CONFIG_DEFAULT_DEVICE_TREE="mt7622-bananapi-bpi-r64"
+++CONFIG_DEFAULT_ENV_FILE="bananapi_bpi-r64-sdmmc_env"
+++CONFIG_NET_RANDOM_ETHADDR=y
+++CONFIG_SMBIOS_PRODUCT_NAME=""
+++CONFIG_AUTOBOOT_KEYED=y
+++CONFIG_BOOTDELAY=30
+++CONFIG_AUTOBOOT_MENU_SHOW=y
+++CONFIG_CFB_CONSOLE_ANSI=y
+++CONFIG_BUTTON=y
+++CONFIG_BUTTON_GPIO=y
+++CONFIG_CMD_ENV_FLAGS=y
+++CONFIG_FIT=y
+++CONFIG_FIT_ENABLE_SHA256_SUPPORT=y
+++CONFIG_LED=y
+++CONFIG_LED_BLINK=y
+++CONFIG_LED_GPIO=y
+++CONFIG_LOGLEVEL=7
+++CONFIG_LOG=y
+++CONFIG_DEFAULT_FDT_FILE="mt7622-bananapi-bpi-r64"
+++CONFIG_SYS_PROMPT="MT7622> "
+++CONFIG_CMD_BOOTMENU=y
+++CONFIG_CMD_BOOTP=y
+++CONFIG_CMD_BUTTON=y
+++CONFIG_CMD_CDP=y
+++CONFIG_CMD_DHCP=y
+++CONFIG_CMD_DNS=y
+++CONFIG_CMD_ECHO=y
+++CONFIG_CMD_ENV_READMEM=y
+++CONFIG_CMD_ERASEENV=y
+++CONFIG_CMD_EXT4=y
+++CONFIG_CMD_FAT=y
+++CONFIG_CMD_FS_GENERIC=y
+++CONFIG_CMD_FS_UUID=y
+++CONFIG_CMD_GPIO=y
+++CONFIG_CMD_GPT=y
+++CONFIG_CMD_HASH=y
+++CONFIG_CMD_ITEST=y
+++CONFIG_CMD_LED=y
+++CONFIG_CMD_LICENSE=y
+++CONFIG_CMD_LINK_LOCAL=y
+++CONFIG_CMD_MBR=y
+++CONFIG_CMD_MMC=y
+++CONFIG_CMD_PCI=y
+++CONFIG_CMD_SF_TEST=y
+++CONFIG_CMD_PING=y
+++CONFIG_CMD_PXE=y
+++CONFIG_CMD_SMC=y
+++CONFIG_CMD_TFTPBOOT=y
+++CONFIG_CMD_TFTPSRV=y
+++CONFIG_CMD_ASKENV=y
+++CONFIG_CMD_PART=y
+++CONFIG_CMD_PSTORE=y
+++CONFIG_CMD_RARP=y
+++CONFIG_CMD_SETEXPR=y
+++CONFIG_CMD_SLEEP=y
+++CONFIG_CMD_SNTP=y
+++CONFIG_CMD_SOURCE=y
+++CONFIG_CMD_USB=y
+++CONFIG_CMD_UUID=y
+++CONFIG_DISPLAY_CPUINFO=y
+++CONFIG_DM_MMC=y
+++CONFIG_DM_REGULATOR=y
+++CONFIG_DM_REGULATOR_FIXED=y
+++CONFIG_DM_REGULATOR_GPIO=y
+++CONFIG_DM_USB=y
+++CONFIG_HUSH_PARSER=y
+++CONFIG_SYS_REDUNDAND_ENVIRONMENT=y
+++CONFIG_SYS_RELOC_GD_ENV_ADDR=y
+++CONFIG_ENV_IS_IN_MMC=y
+++CONFIG_SYS_MMC_ENV_DEV=1
+++CONFIG_ENV_OFFSET=0x400000
+++CONFIG_ENV_OFFSET_REDUND=0x480000
+++CONFIG_ENV_SIZE=0x80000
+++CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG=y
+++CONFIG_VERSION_VARIABLE=y
+++CONFIG_PARTITION_UUIDS=y
+++CONFIG_NETCONSOLE=y
+++CONFIG_REGMAP=y
+++CONFIG_SYSCON=y
+++CONFIG_CLK=y
+++CONFIG_PHY_FIXED=y
+++CONFIG_DM_ETH=y
+++CONFIG_MEDIATEK_ETH=y
+++CONFIG_PCI=y
+++CONFIG_DM_PCI=y
+++CONFIG_PCIE_MEDIATEK=y
+++CONFIG_PINCTRL=y
+++CONFIG_PINCONF=y
+++CONFIG_PINCTRL_MT7622=y
+++CONFIG_POWER_DOMAIN=y
+++CONFIG_PRE_CONSOLE_BUFFER=y
+++CONFIG_PRE_CON_BUF_ADDR=0x4007EF00
+++CONFIG_MTK_POWER_DOMAIN=y
+++CONFIG_RAM=y
+++CONFIG_DM_SERIAL=y
+++CONFIG_MTK_SERIAL=y
+++CONFIG_MMC=y
+++CONFIG_MMC_DEFAULT_DEV=1
+++CONFIG_MMC_MTK=y
+++CONFIG_SUPPORT_EMMC_BOOT=y
+++CONFIG_SYSRESET_WATCHDOG=y
+++CONFIG_TIMER=y
+++CONFIG_MTK_TIMER=y
+++CONFIG_WDT_MTK=y
+++CONFIG_LZO=y
+++CONFIG_ZSTD=y
+++CONFIG_HEXDUMP=y
+++CONFIG_RANDOM_UUID=y
+++CONFIG_REGEX=y
+++CONFIG_USB=y
+++CONFIG_USB_HOST=y
+++CONFIG_USB_XHCI_HCD=y
+++CONFIG_USB_XHCI_MTK=y
+++CONFIG_USB_STORAGE=y
++--- /dev/null
+++++ b/bananapi_bpi-r64-sdmmc_env
++@@ -0,0 +1,54 @@
+++ipaddr=192.168.0.45
+++serverip=192.168.0.100
+++loadaddr=0x4007ff28
+++bootcmd=run boot_sdmmc
+++bootargs=earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk1p6
+++bootdelay=0
+++bootfile=openwrt-mediatek-mt7622-bananapi_bpi-r64-initramfs-recovery.itb
+++bootfile_upg=openwrt-mediatek-mt7622-bananapi_bpi-r64-squashfs-sysupgrade.itb
+++bootfile_emmcbl3=openwrt-mediatek-mt7622-bananapi_bpi-r64-boot-emmc.img
+++bootfile_emmcbl2=openwrt-mediatek-mt7622-bananapi_bpi-r64-bl2-emmc.bin
+++bootmenu_confirm_return=askenv - Press ENTER to return to menu ; bootmenu
+++bootmenu_default=0
+++bootmenu_delay=0
+++bootmenu_title=      [0;34m( ( ( [1;39mOpenWrt[0;34m ) ) )  [0;36m[SD card][0m
+++bootmenu_0=0. Initialize environment.=run _firstboot
+++bootmenu_0d=0. Run default boot command.=run boot_default
+++bootmenu_1=1. Boot system via TFTP.=run boot_tftp ; run bootmenu_confirm_return
+++bootmenu_2=2. Boot production system from SD card.=run boot_production ; run bootmenu_confirm_return
+++bootmenu_3=3. Boot recovery system from SD card.=run boot_recovery ; run bootmenu_confirm_return
+++bootmenu_4=4. Load production system via TFTP then write to SD card.=setenv noboot 1 ; run boot_tftp_production ; setenv noboot ; run bootmenu_confirm_return
+++bootmenu_5=5. Load recovery system via TFTP then write to SD card.=setenv noboot 1 ; run boot_tftp_recovery ; setenv noboot ; run bootmenu_confirm_return
+++bootmenu_6=[31m6. Load bootloader via TFTP then write to eMMC.[0m=run emmc_init ; run bootmenu_confirm_return
+++bootmenu_7=7. Reboot.=reset
+++bootmenu_8=8. Reset all settings to factory defaults.=run reset_factory ; reset
+++boot_default=if env exists flag_recover ; then else run bootcmd ; fi ; run boot_recovery ; run boot_tftp_forever
+++boot_first=if button reset ; then run boot_tftp_forever ; fi ; setenv flag_recover 1 ; bootmenu
+++boot_production=led bpi-r64:pio:green on ; run sdmmc_read_production && bootm $loadaddr
+++boot_recovery=led bpi-r64:pio:green off ; run sdmmc_read_recovery && bootm $loadaddr
+++boot_sdmmc=run boot_production ; run boot_recovery
+++boot_tftp_forever=led bpi-r64:pio:blue on ; while true ; do run boot_tftp_recovery ; sleep 1 ; done
+++boot_tftp_production=tftpboot $loadaddr $bootfile_upg && run sdmmc_write_production ; if env exists noboot ; then else bootm $loadaddr ; fi
+++boot_tftp_recovery=tftpboot $loadaddr $bootfile && iminfo $loadaddr && run sdmmc_write_recovery ; if env exists noboot ; then else bootm $loadaddr ; fi
+++boot_tftp=tftpboot $loadaddr $bootfile && bootm $loadaddr
+++emmc_write_bl2=mmc dev 0 1 && mmc partconf 0 1 1 1 && mmc erase 0x0 0x400 && mmc write $loadaddr 0x0 0x100 ; mmc partconf 0 1 1 0
+++emmc_write_hdr=mmc dev 0 0 && mmc erase 0x0 0x40 && mmc write $loadaddr 0x0 0x40
+++emmc_write_bl3=mmc dev 0 0 && mmc erase 0x1000 0x800 && mmc write $loadaddr 0x1000 0x800
+++emmc_write_recovery=iminfo $loadaddr && mmc dev 0 && part start mmc 0 $part_recovery part_addr && part size mmc 0 $part_recovery part_size && run mmc_write_vol
+++emmc_init=run sdmmc_read_emmc_hdr && run emmc_write_hdr && run sdmmc_read_emmc_bl3 && run emmc_write_bl3 && run sdmmc_read_recovery && run emmc_write_recovery && run sdmmc_read_emmc_bl2 && run emmc_write_bl2
+++sdmmc_write_production=iminfo $fileaddr && mmc dev 1 && part start mmc 1 $part_default part_addr && part size mmc 1 $part_default part_size && run mmc_write_vol
+++sdmmc_write_recovery=iminfo $fileaddr && mmc dev 1 && part start mmc 1 $part_recovery part_addr && part size mmc 1 $part_recovery part_size && run mmc_write_vol
+++sdmmc_read_production=mmc dev 1 && part start mmc 1 $part_default part_addr && part size mmc 1 $part_default part_size && run mmc_read_vol
+++sdmmc_read_recovery=mmc dev 1 && part start mmc 1 $part_recovery part_addr && part size mmc 1 $part_recovery part_size && run mmc_read_vol
+++sdmmc_read_emmc_hdr=mmc dev 1 && mmc read $loadaddr 0x100 0x40
+++sdmmc_read_emmc_bl2=mmc dev 1 && mmc read $loadaddr 0x200 0x100
+++sdmmc_read_emmc_bl3=mmc dev 1 && mmc read $loadaddr 0x800 0x800
+++mmc_write_vol=imszb $loadaddr image_size && test 0x$image_size -le 0x$part_size && mmc erase 0x$part_addr 0x$part_size && mmc write $loadaddr 0x$part_addr 0x$image_size
+++mmc_read_vol=mmc read $loadaddr $part_addr 0x8 && imszb $loadaddr image_size && test 0x$image_size -le 0x$part_size && mmc read $loadaddr 0x$part_addr 0x$image_size
+++part_default=production
+++part_recovery=recovery
+++reset_factory=mmc dev 1 && mmc erase 0x2000 0x800 && reset
+++_init_env=setenv _init_env ; setenv _create_env ; saveenv ; saveenv
+++_firstboot=setenv _firstboot ; led bpi-r64:pio:blue on ; run _switch_to_menu ; run _init_env ; run boot_first
+++_switch_to_menu=setenv _switch_to_menu ; setenv bootdelay 3 ; setenv bootmenu_delay 3 ; setenv bootmenu_0 $bootmenu_0d ; setenv bootmenu_0d ; run _bootmenu_update_title
+++_bootmenu_update_title=setenv _bootmenu_update_title ; setenv bootmenu_title "$bootmenu_title       [33m$ver[0m"
++--- /dev/null
+++++ b/configs/mt7622_bananapi_bpi-r64-emmc_defconfig
++@@ -0,0 +1,123 @@
+++CONFIG_ARM=y
+++CONFIG_POSITION_INDEPENDENT=y
+++CONFIG_ARCH_MEDIATEK=y
+++CONFIG_SYS_TEXT_BASE=0x41e00000
+++CONFIG_SYS_MALLOC_F_LEN=0x4000
+++CONFIG_USE_DEFAULT_ENV_FILE=y
+++CONFIG_BOARD_LATE_INIT=y
+++CONFIG_BOOTP_SEND_HOSTNAME=y
+++CONFIG_NR_DRAM_BANKS=1
+++CONFIG_DEFAULT_DEVICE_TREE="mt7622-bananapi-bpi-r64"
+++CONFIG_DEFAULT_ENV_FILE="bananapi_bpi-r64-emmc_env"
+++CONFIG_NET_RANDOM_ETHADDR=y
+++CONFIG_SMBIOS_PRODUCT_NAME=""
+++CONFIG_AUTOBOOT_KEYED=y
+++CONFIG_BOOTDELAY=30
+++CONFIG_AUTOBOOT_MENU_SHOW=y
+++CONFIG_CFB_CONSOLE_ANSI=y
+++CONFIG_BUTTON=y
+++CONFIG_BUTTON_GPIO=y
+++CONFIG_CMD_ENV_FLAGS=y
+++CONFIG_FIT=y
+++CONFIG_FIT_ENABLE_SHA256_SUPPORT=y
+++CONFIG_LED=y
+++CONFIG_LED_BLINK=y
+++CONFIG_LED_GPIO=y
+++CONFIG_LOGLEVEL=7
+++CONFIG_LOG=y
+++CONFIG_DEFAULT_FDT_FILE="mt7622-bananapi-bpi-r64"
+++CONFIG_SYS_PROMPT="MT7622> "
+++CONFIG_CMD_BOOTMENU=y
+++CONFIG_CMD_BOOTP=y
+++CONFIG_CMD_BUTTON=y
+++CONFIG_CMD_CDP=y
+++CONFIG_CMD_DHCP=y
+++CONFIG_CMD_DNS=y
+++CONFIG_CMD_ECHO=y
+++CONFIG_CMD_ENV_READMEM=y
+++CONFIG_CMD_ERASEENV=y
+++CONFIG_CMD_EXT4=y
+++CONFIG_CMD_FAT=y
+++CONFIG_CMD_FS_GENERIC=y
+++CONFIG_CMD_FS_UUID=y
+++CONFIG_CMD_GPIO=y
+++CONFIG_CMD_GPT=y
+++CONFIG_CMD_HASH=y
+++CONFIG_CMD_ITEST=y
+++CONFIG_CMD_LED=y
+++CONFIG_CMD_LICENSE=y
+++CONFIG_CMD_LINK_LOCAL=y
+++CONFIG_CMD_MBR=y
+++CONFIG_CMD_MMC=y
+++CONFIG_CMD_PCI=y
+++CONFIG_CMD_SF_TEST=y
+++CONFIG_CMD_PING=y
+++CONFIG_CMD_PXE=y
+++CONFIG_CMD_SMC=y
+++CONFIG_CMD_TFTPBOOT=y
+++CONFIG_CMD_TFTPSRV=y
+++CONFIG_CMD_ASKENV=y
+++CONFIG_CMD_PART=y
+++CONFIG_CMD_PSTORE=y
+++CONFIG_CMD_RARP=y
+++CONFIG_CMD_SETEXPR=y
+++CONFIG_CMD_SLEEP=y
+++CONFIG_CMD_SNTP=y
+++CONFIG_CMD_SOURCE=y
+++CONFIG_CMD_USB=y
+++CONFIG_CMD_UUID=y
+++CONFIG_DISPLAY_CPUINFO=y
+++CONFIG_DM_MMC=y
+++CONFIG_DM_REGULATOR=y
+++CONFIG_DM_REGULATOR_FIXED=y
+++CONFIG_DM_REGULATOR_GPIO=y
+++CONFIG_DM_USB=y
+++CONFIG_HUSH_PARSER=y
+++CONFIG_SYS_REDUNDAND_ENVIRONMENT=y
+++CONFIG_SYS_RELOC_GD_ENV_ADDR=y
+++CONFIG_ENV_IS_IN_MMC=y
+++CONFIG_SYS_MMC_ENV_DEV=0
+++CONFIG_ENV_OFFSET=0x400000
+++CONFIG_ENV_OFFSET_REDUND=0x480000
+++CONFIG_ENV_SIZE=0x80000
+++CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG=y
+++CONFIG_VERSION_VARIABLE=y
+++CONFIG_PARTITION_UUIDS=y
+++CONFIG_NETCONSOLE=y
+++CONFIG_REGMAP=y
+++CONFIG_SYSCON=y
+++CONFIG_CLK=y
+++CONFIG_PHY_FIXED=y
+++CONFIG_DM_ETH=y
+++CONFIG_MEDIATEK_ETH=y
+++CONFIG_PCI=y
+++CONFIG_DM_PCI=y
+++CONFIG_PCIE_MEDIATEK=y
+++CONFIG_PINCTRL=y
+++CONFIG_PINCONF=y
+++CONFIG_PINCTRL_MT7622=y
+++CONFIG_POWER_DOMAIN=y
+++CONFIG_PRE_CONSOLE_BUFFER=y
+++CONFIG_PRE_CON_BUF_ADDR=0x4007EF00
+++CONFIG_MTK_POWER_DOMAIN=y
+++CONFIG_RAM=y
+++CONFIG_DM_SERIAL=y
+++CONFIG_MTK_SERIAL=y
+++CONFIG_MMC=y
+++CONFIG_MMC_DEFAULT_DEV=0
+++CONFIG_MMC_MTK=y
+++CONFIG_SUPPORT_EMMC_BOOT=y
+++CONFIG_SYSRESET_WATCHDOG=y
+++CONFIG_TIMER=y
+++CONFIG_MTK_TIMER=y
+++CONFIG_WDT_MTK=y
+++CONFIG_LZO=y
+++CONFIG_ZSTD=y
+++CONFIG_HEXDUMP=y
+++CONFIG_RANDOM_UUID=y
+++CONFIG_REGEX=y
+++CONFIG_USB=y
+++CONFIG_USB_HOST=y
+++CONFIG_USB_XHCI_HCD=y
+++CONFIG_USB_XHCI_MTK=y
+++CONFIG_USB_STORAGE=y
++--- /dev/null
+++++ b/bananapi_bpi-r64-emmc_env
++@@ -0,0 +1,43 @@
+++ipaddr=192.168.0.45
+++serverip=192.168.0.100
+++loadaddr=0x4007ff28
+++bootcmd=run boot_emmc
+++bootargs=earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk0p5
+++bootdelay=0
+++bootfile=openwrt-mediatek-mt7622-bananapi_bpi-r64-initramfs-recovery.itb
+++bootfile_upg=openwrt-mediatek-mt7622-bananapi_bpi-r64-squashfs-sysupgrade.itb
+++bootmenu_confirm_return=askenv - Press ENTER to return to menu ; bootmenu
+++bootmenu_default=0
+++bootmenu_delay=0
+++bootmenu_title=      [0;34m( ( ( [1;39mOpenWrt[0;34m ) ) )  [0;36m[eMMC][0m
+++bootmenu_0=0. Initialize environment.=run _firstboot
+++bootmenu_0d=0. Run default boot command.=run boot_default
+++bootmenu_1=1. Boot system via TFTP.=run boot_tftp ; run bootmenu_confirm_return
+++bootmenu_2=2. Boot production system from eMMC.=run boot_production ; run bootmenu_confirm_return
+++bootmenu_3=3. Boot recovery system from eMMC.=run boot_recovery ; run bootmenu_confirm_return
+++bootmenu_4=4. Load production system via TFTP then write to eMMC.=setenv noboot 1 ; run boot_tftp_production ; setenv noboot ; run bootmenu_confirm_return
+++bootmenu_5=5. Load recovery system via TFTP then write to eMMC.=setenv noboot 1 ; run boot_tftp_recovery ; setenv noboot ; run bootmenu_confirm_return
+++bootmenu_6=6. Reboot.=reset
+++bootmenu_7=7. Reset all settings to factory defaults.=run reset_factory ; reset
+++boot_default=if env exists flag_recover ; then else run bootcmd ; fi ; run boot_recovery ; run boot_tftp_forever
+++boot_first=if button reset ; then run boot_tftp_forever ; fi ; setenv flag_recover 1 ; bootmenu
+++boot_production=led bpi-r64:pio:green on ; run emmc_read_production && bootm $loadaddr
+++boot_recovery=led bpi-r64:pio:green off ; run emmc_read_recovery && bootm $loadaddr
+++boot_emmc=run boot_production ; run boot_recovery
+++boot_tftp_forever=led bpi-r64:pio:blue on ; while true ; do run boot_tftp_recovery ; sleep 1 ; done
+++boot_tftp_production=tftpboot $loadaddr $bootfile_upg && run emmc_write_production ; if env exists noboot ; then else bootm $loadaddr ; fi
+++boot_tftp_recovery=tftpboot $loadaddr $bootfile && iminfo $loadaddr && run emmc_write_recovery ; if env exists noboot ; then else bootm $loadaddr ; fi
+++boot_tftp=tftpboot $loadaddr $bootfile && bootm $loadaddr
+++emmc_write_production=iminfo $fileaddr && mmc dev 0 && part start mmc 0 $part_default part_addr && part size mmc 0 $part_default part_size && run mmc_write_vol
+++emmc_write_recovery=iminfo $fileaddr && mmc dev 0 && part start mmc 0 $part_recovery part_addr && part size mmc 0 $part_recovery part_size && run mmc_write_vol
+++emmc_read_production=mmc dev 0 && part start mmc 0 $part_default part_addr && part size mmc 0 $part_default part_size && run mmc_read_vol
+++emmc_read_recovery=mmc dev 0 && part start mmc 0 $part_recovery part_addr && part size mmc 0 $part_recovery part_size && run mmc_read_vol
+++mmc_write_vol=imszb $fileaddr image_size && test 0x$image_size -le 0x$part_size && mmc erase 0x$part_addr 0x$part_size && mmc write $fileaddr 0x$part_addr 0x$image_size
+++mmc_read_vol=mmc read $loadaddr $part_addr 0x8 && imszb $loadaddr image_size && test 0x$image_size -le 0x$part_size && mmc read $loadaddr 0x$part_addr 0x$image_size
+++part_default=production
+++part_recovery=recovery
+++reset_factory=mmc dev 0 && mmc erase 0x2000 0x800 && reset
+++_init_env=setenv _init_env ; setenv _create_env ; saveenv ; saveenv
+++_firstboot=setenv _firstboot ; led bpi-r64:pio:blue on ; run _switch_to_menu ; run _init_env ; run boot_first
+++_switch_to_menu=setenv _switch_to_menu ; setenv bootdelay 3 ; setenv bootmenu_delay 3 ; setenv bootmenu_0 $bootmenu_0d ; setenv bootmenu_0d ; run _bootmenu_update_title
+++_bootmenu_update_title=setenv _bootmenu_update_title ; setenv bootmenu_title "$bootmenu_title       [33m$ver[0m"
+diff --git a/package/boot/uboot-mediatek/patches/020-add-linksys-e8450.patch b/package/boot/uboot-mediatek/patches/020-add-linksys-e8450.patch
+new file mode 100644
+index 0000000000..711c1e6983
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/020-add-linksys-e8450.patch
+@@ -0,0 +1,436 @@
++--- /dev/null
+++++ b/configs/mt7622_linksys_e8450_defconfig
++@@ -0,0 +1,130 @@
+++CONFIG_ARM=y
+++CONFIG_POSITION_INDEPENDENT=y
+++CONFIG_ARCH_MEDIATEK=y
+++CONFIG_SYS_TEXT_BASE=0x41e00000
+++CONFIG_SYS_MALLOC_F_LEN=0x4000
+++CONFIG_USE_DEFAULT_ENV_FILE=y
+++CONFIG_BOARD_LATE_INIT=y
+++CONFIG_BOOTP_SEND_HOSTNAME=y
+++CONFIG_DEFAULT_ENV_FILE="linksys_e8450_env"
+++CONFIG_NR_DRAM_BANKS=1
+++CONFIG_DEFAULT_DEVICE_TREE="mt7622-linksys-e8450-ubi"
+++CONFIG_SMBIOS_PRODUCT_NAME=""
+++CONFIG_AUTOBOOT_KEYED=y
+++CONFIG_BOOTDELAY=30
+++CONFIG_AUTOBOOT_MENU_SHOW=y
+++CONFIG_CFB_CONSOLE_ANSI=y
+++CONFIG_BUTTON=y
+++CONFIG_BUTTON_GPIO=y
+++CONFIG_CMD_ENV_FLAGS=y
+++CONFIG_FIT=y
+++CONFIG_FIT_ENABLE_SHA256_SUPPORT=y
+++CONFIG_LED=y
+++CONFIG_LED_BLINK=y
+++CONFIG_LED_GPIO=y
+++CONFIG_LOGLEVEL=7
+++CONFIG_LOG=y
+++CONFIG_DEFAULT_FDT_FILE="mt7622-linksys-e8450"
+++CONFIG_SYS_PROMPT="MT7622> "
+++CONFIG_CMD_BOOTMENU=y
+++CONFIG_CMD_BOOTP=y
+++CONFIG_CMD_BUTTON=y
+++CONFIG_CMD_CDP=y
+++CONFIG_CMD_DHCP=y
+++CONFIG_CMD_DNS=y
+++CONFIG_CMD_ECHO=y
+++CONFIG_CMD_ENV_READMEM=y
+++CONFIG_CMD_ERASEENV=y
+++CONFIG_CMD_EXT4=y
+++CONFIG_CMD_FAT=y
+++CONFIG_CMD_FS_GENERIC=y
+++CONFIG_CMD_FS_UUID=y
+++CONFIG_CMD_GPIO=y
+++CONFIG_CMD_GPT=y
+++CONFIG_CMD_HASH=y
+++CONFIG_CMD_ITEST=y
+++CONFIG_CMD_LED=y
+++CONFIG_CMD_LICENSE=y
+++CONFIG_CMD_LINK_LOCAL=y
+++CONFIG_CMD_MBR=y
+++CONFIG_CMD_MTD=y
+++CONFIG_CMD_MTDPART=y
+++CONFIG_CMD_NAND=y
+++CONFIG_CMD_PCI=y
+++CONFIG_CMD_SF_TEST=y
+++CONFIG_CMD_PING=y
+++CONFIG_CMD_PXE=y
+++CONFIG_CMD_SMC=y
+++CONFIG_CMD_TFTPBOOT=y
+++CONFIG_CMD_TFTPSRV=y
+++CONFIG_CMD_UBI=y
+++CONFIG_CMD_UBI_RENAME=y
+++CONFIG_CMD_UBIFS=y
+++CONFIG_CMD_ASKENV=y
+++CONFIG_CMD_PART=y
+++CONFIG_CMD_PSTORE=y
+++CONFIG_CMD_RARP=y
+++CONFIG_CMD_SETEXPR=y
+++CONFIG_CMD_SLEEP=y
+++CONFIG_CMD_SNTP=y
+++CONFIG_CMD_SOURCE=y
+++CONFIG_CMD_USB=y
+++CONFIG_CMD_UUID=y
+++CONFIG_DISPLAY_CPUINFO=y
+++CONFIG_DM_REGULATOR=y
+++CONFIG_DM_REGULATOR_FIXED=y
+++CONFIG_DM_REGULATOR_GPIO=y
+++CONFIG_DM_USB=y
+++CONFIG_HUSH_PARSER=y
+++CONFIG_SYS_REDUNDAND_ENVIRONMENT=y
+++CONFIG_SYS_RELOC_GD_ENV_ADDR=y
+++CONFIG_ENV_IS_IN_UBI=y
+++CONFIG_ENV_UBI_PART="ubi"
+++CONFIG_ENV_UBI_VOLUME="ubootenv"
+++CONFIG_ENV_UBI_VOLUME_REDUND="ubootenv2"
+++CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG=y
+++CONFIG_VERSION_VARIABLE=y
+++CONFIG_PARTITION_UUIDS=y
+++CONFIG_NETCONSOLE=y
+++CONFIG_REGMAP=y
+++CONFIG_SYSCON=y
+++CONFIG_CLK=y
+++CONFIG_DM_MTD=y
+++CONFIG_PHY_FIXED=y
+++CONFIG_DM_ETH=y
+++CONFIG_MEDIATEK_ETH=y
+++CONFIG_PCI=y
+++CONFIG_MTD=y
+++CONFIG_MTD_RAW_NAND=y
+++CONFIG_MTD_UBI_FASTMAP=y
+++CONFIG_DM_PCI=y
+++CONFIG_PCIE_MEDIATEK=y
+++CONFIG_PINCTRL=y
+++CONFIG_PINCONF=y
+++CONFIG_PINCTRL_MT7622=y
+++CONFIG_POWER_DOMAIN=y
+++CONFIG_PRE_CONSOLE_BUFFER=y
+++CONFIG_PRE_CON_BUF_ADDR=0x4007EF00
+++CONFIG_MTK_POWER_DOMAIN=y
+++CONFIG_RAM=y
+++CONFIG_DM_SERIAL=y
+++CONFIG_MTK_SERIAL=y
+++CONFIG_SPI=y
+++CONFIG_DM_SPI=y
+++CONFIG_MTK_SNFI_SPI=y
+++CONFIG_MTK_SPI_NAND=y
+++CONFIG_NAND_SUPPORT=y
+++CONFIG_SYSRESET_WATCHDOG=y
+++CONFIG_TIMER=y
+++CONFIG_MTK_TIMER=y
+++CONFIG_WDT_MTK=y
+++CONFIG_LZO=y
+++CONFIG_ZSTD=y
+++CONFIG_HEXDUMP=y
+++CONFIG_RANDOM_UUID=y
+++CONFIG_REGEX=y
+++CONFIG_USB=y
+++CONFIG_USB_HOST=y
+++CONFIG_USB_XHCI_HCD=y
+++CONFIG_USB_XHCI_MTK=y
+++CONFIG_USB_STORAGE=y
++--- /dev/null
+++++ b/arch/arm/dts/mt7622-linksys-e8450-ubi.dts
++@@ -0,0 +1,206 @@
+++// SPDX-License-Identifier: GPL-2.0
+++/*
+++ * Copyright (c) 2019 MediaTek Inc.
+++ * Author: Sam Shih <sam.shih@mediatek.com>
+++ */
+++
+++/dts-v1/;
+++#include "mt7622.dtsi"
+++#include "mt7622-u-boot.dtsi"
+++
+++/ {
+++	#address-cells = <1>;
+++	#size-cells = <1>;
+++	model = "mt7622-linksys-e8450-ubi";
+++	compatible = "mediatek,mt7622", "linksys,e8450-ubi";
+++	chosen {
+++		stdout-path = &uart0;
+++		tick-timer = &timer0;
+++	};
+++
+++	aliases {
+++		spi0 = &snfi;
+++	};
+++
+++	gpio-keys {
+++		compatible = "gpio-keys";
+++
+++		factory {
+++			label = "reset";
+++			gpios = <&gpio 0 GPIO_ACTIVE_LOW>;
+++		};
+++
+++		wps {
+++			label = "wps";
+++			gpios = <&gpio 102 GPIO_ACTIVE_LOW>;
+++		};
+++	};
+++
+++	gpio-leds {
+++		compatible = "gpio-leds";
+++
+++		led_power: power_blue {
+++			label = "power:blue";
+++			gpios = <&gpio 95 GPIO_ACTIVE_LOW>;
+++			default-state = "on";
+++		};
+++
+++		power_orange {
+++			label = "power:orange";
+++			gpios = <&gpio 96 GPIO_ACTIVE_LOW>;
+++			default-state = "off";
+++		};
+++
+++		inet_blue {
+++			label = "inet:blue";
+++			gpios = <&gpio 97 GPIO_ACTIVE_LOW>;
+++			default-state = "off";
+++		};
+++
+++		inet_orange {
+++			label = "inet:orange";
+++			gpios = <&gpio 98 GPIO_ACTIVE_LOW>;
+++			default-state = "off";
+++		};
+++	};
+++
+++	memory@40000000 {
+++		device_type = "memory";
+++		reg = <0x40000000 0x20000000>;
+++	};
+++
+++	reg_1p8v: regulator-1p8v {
+++		compatible = "regulator-fixed";
+++		regulator-name = "fixed-1.8V";
+++		regulator-min-microvolt = <1800000>;
+++		regulator-max-microvolt = <1800000>;
+++		regulator-boot-on;
+++		regulator-always-on;
+++	};
+++
+++	reg_3p3v: regulator-3p3v {
+++		compatible = "regulator-fixed";
+++		regulator-name = "fixed-3.3V";
+++		regulator-min-microvolt = <3300000>;
+++		regulator-max-microvolt = <3300000>;
+++		regulator-boot-on;
+++		regulator-always-on;
+++	};
+++
+++	reg_5v: regulator-5v {
+++		compatible = "regulator-fixed";
+++		regulator-name = "fixed-5V";
+++		regulator-min-microvolt = <5000000>;
+++		regulator-max-microvolt = <5000000>;
+++		regulator-boot-on;
+++		regulator-always-on;
+++	};
+++};
+++
+++&pcie {
+++	pinctrl-names = "default";
+++	pinctrl-0 = <&pcie0_pins>, <&pcie1_pins>;
+++	status = "okay";
+++
+++	pcie@0,0 {
+++		status = "okay";
+++	};
+++
+++	pcie@1,0 {
+++		status = "okay";
+++	};
+++};
+++
+++&pinctrl {
+++	pcie0_pins: pcie0-pins {
+++		mux {
+++			function = "pcie";
+++			groups = "pcie0_pad_perst",
+++				 "pcie0_1_waken",
+++				 "pcie0_1_clkreq";
+++		};
+++	};
+++
+++	pcie1_pins: pcie1-pins {
+++		mux {
+++			function = "pcie";
+++			groups = "pcie1_pad_perst",
+++				 "pcie1_0_waken",
+++				 "pcie1_0_clkreq";
+++		};
+++	};
+++
+++	snfi_pins: snfi-pins {
+++		mux {
+++			function = "flash";
+++			groups = "snfi";
+++		};
+++	};
+++
+++	uart0_pins: uart0 {
+++		mux {
+++			function = "uart";
+++			groups = "uart0_0_tx_rx" ;
+++		};
+++	};
+++
+++	watchdog_pins: watchdog-default {
+++		mux {
+++			function = "watchdog";
+++			groups = "watchdog";
+++		};
+++	};
+++};
+++
+++&snfi {
+++	pinctrl-names = "default";
+++	pinctrl-0 = <&snfi_pins>;
+++	status = "okay";
+++
+++	mediatek,bmt-v2;
+++
+++	spi-flash@0{
+++		compatible = "jedec,spi-nor";
+++		reg = <0>;
+++		u-boot,dm-pre-reloc;
+++	};
+++};
+++
+++&nandc {
+++	status = "okay";
+++};
+++
+++&uart0 {
+++	pinctrl-names = "default";
+++	pinctrl-0 = <&uart0_pins>;
+++	status = "okay";
+++};
+++
+++&watchdog {
+++	pinctrl-names = "default";
+++	pinctrl-0 = <&watchdog_pins>;
+++	status = "okay";
+++};
+++
+++&eth {
+++	status = "okay";
+++	mediatek,gmac-id = <0>;
+++	phy-mode = "sgmii";
+++	mediatek,switch = "mt7531";
+++	reset-gpios = <&gpio 54 GPIO_ACTIVE_HIGH>;
+++
+++	fixed-link {
+++		speed = <1000>;
+++		full-duplex;
+++	};
+++};
+++
+++&ssusb {
+++	vusb33-supply = <&reg_3p3v>;
+++	vbus-supply = <&reg_5v>;
+++	status = "okay";
+++};
+++
+++&u3phy {
+++	status = "okay";
+++};
++--- a/arch/arm/dts/Makefile
+++++ b/arch/arm/dts/Makefile
++@@ -963,6 +963,7 @@ dtb-$(CONFIG_ARCH_MEDIATEK) += \
++ 	mt7622-rfb.dtb \
++ 	mt7623a-unielec-u7623-02-emmc.dtb \
++ 	mt7622-bananapi-bpi-r64.dtb \
+++	mt7622-linksys-e8450-ubi.dtb \
++ 	mt7623n-bananapi-bpi-r2.dtb \
++ 	mt7629-rfb.dtb \
++ 	mt8512-bm1-emmc.dtb \
++--- a/drivers/mtd/nandx/core/nand/device_spi.c
+++++ b/drivers/mtd/nandx/core/nand/device_spi.c
++@@ -150,6 +150,21 @@ static struct device_spi spi_nand[] = {
++ 		&spi_extend_cmds, 0xff, 0xff
++ 	},
++ 	{
+++		NAND_DEVICE("FM35X1GA",
+++			    NAND_PACK_ID(0xe5, 0x71, 0, 0, 0, 0, 0, 0),
+++			    2, 0, 3, 3,
+++			    1, 1, 1, 1024, KB(128), KB(2), 64, 1,
+++			    &spi_cmds, &spi_addressing, &spi_status[0],
+++			    &spi_endurance, &spi_array_timing),
+++		{
+++			NAND_SPI_PROTECT(0xa0, 1, 2, 6),
+++			NAND_SPI_CONFIG(0xb0, 4, 6, 1),
+++			NAND_SPI_STATUS(0xc0, 4, 5),
+++			NAND_SPI_CHARACTER(0xff, 0xff, 0xff, 0xff)
+++		},
+++		&spi_extend_cmds, 0xff, 0xff
+++	},
+++	{
++ 		NAND_DEVICE("NO-DEVICE",
++ 			    NAND_PACK_ID(0, 0, 0, 0, 0, 0, 0, 0), 0, 0, 0, 0,
++ 			    0, 0, 0, 0, 0, 0, 0, 1,
++--- /dev/null
+++++ b/linksys_e8450_env
++@@ -0,0 +1,57 @@
+++mtdparts=nand0:512k(bl2),1280k(fip),1024k(factory),256k(reserved),-(ubi)
+++ethaddr_factory=nand read 0x40080000 0x220000 0x20000 && env readmem -b ethaddr 0x4009fff4 0x6 ; setenv ethaddr_factory
+++ipaddr=192.168.1.1
+++serverip=192.168.1.254
+++loadaddr=0x4007ff28
+++bootcmd=run boot_ubi
+++bootdelay=0
+++bootfile=openwrt-mediatek-mt7622-linksys_e8450-ubi-initramfs-recovery.itb
+++bootfile_bl2=openwrt-mediatek-mt7622-linksys_e8450-ubi-preloader.bin
+++bootfile_fip=openwrt-mediatek-mt7622-linksys_e8450-ubi-bl31-uboot.fip
+++bootfile_upg=openwrt-mediatek-mt7622-linksys_e8450-ubi-squashfs-sysupgrade.itb
+++bootmenu_confirm_return=askenv - Press ENTER to return to menu ; bootmenu
+++bootmenu_default=0
+++bootmenu_delay=0
+++bootmenu_title=      [0;34m( ( ( [1;39mOpenWrt[0;34m ) ) )[0m
+++bootmenu_0=0. Initialize environment.=run _firstboot
+++bootmenu_0d=0. Run default boot command.=run boot_default
+++bootmenu_1=1. Boot system via TFTP.=run boot_tftp ; run bootmenu_confirm_return
+++bootmenu_3=2. Boot production system from flash.=run boot_production ; run bootmenu_confirm_return
+++bootmenu_2=3. Boot recovery system from flash.=run boot_recovery ; run bootmenu_confirm_return
+++bootmenu_5=4. Load production system via TFTP then write to flash.=setenv noboot 1 ; run boot_tftp_production ; setenv noboot ; run bootmenu_confirm_return
+++bootmenu_4=5. Load recovery system via TFTP then write to flash.=setenv noboot 1 ; run boot_tftp_recovery ; setenv noboot ; run bootmenu_confirm_return
+++bootmenu_6=[31m6. Load BL31+U-Boot FIP via TFTP then write to flash.[0m=run boot_tftp_write_fip ; run bootmenu_confirm_return
+++bootmenu_7=[31m7. Load BL2 preloader via TFTP then write to flash.[0m=run boot_tftp_write_preloader ; run bootmenu_confirm_return
+++bootmenu_8=8. Reboot.=reset
+++bootmenu_9=9. Reset all settings to factory defaults.=run reset_factory ; reset
+++boot_first=if button reset ; then run boot_tftp_forever ; fi ; setenv flag_recover 1 ; bootmenu
+++boot_default=if env exists flag_recover ; then else run bootcmd ; fi ; run boot_recovery ; run boot_tftp_forever
+++boot_production=led power:blue on ; run ubi_read_production && bootm $loadaddr
+++boot_production_or_recovery=run boot_production ; run boot_recovery
+++boot_recovery=led power:blue off ; led power:orange on ; run check_recovery
+++boot_serial_write_fip=loadx $loadaddr 115200 && run boot_write_fip
+++boot_serial_write_preloader=loadx $loadaddr 115200 && run boot_write_preloader
+++boot_tftp_forever=led inet:blue on ; while true ; do run boot_tftp_recovery ; led inet:blue off ; led inet:orange on ; sleep 1 ; done
+++boot_tftp_production=tftpboot $loadaddr $bootfile_upg && iminfo $loadaddr && ubi part ubi && run ubi_write_production ubi_prepare_rootfs ; if env exists noboot ; then else bootm $loadaddr ; fi
+++boot_tftp_recovery=tftpboot $loadaddr $bootfile && iminfo $loadaddr && ubi part ubi && run ubi_write_recovery ; if env exists noboot ; then else bootm $loadaddr ; fi
+++boot_tftp=tftpboot $loadaddr $bootfile && bootm $loadaddr
+++boot_tftp_write_fip=tftpboot $loadaddr $bootfile_fip && run boot_write_fip
+++boot_tftp_write_preloader=tftpboot $loadaddr $bootfile_bl2 && run boot_write_preloader
+++boot_ubi=ubi part ubi && run boot_production_or_recovery
+++boot_write_fip=nand erase 0x80000 0x140000 && nand write $loadaddr 0x80000 0x140000
+++boot_write_preloader=nand erase 0x0 0x80000 && nand write $loadaddr 0x0 0x20000 && nand write $loadaddr 0x20000 0x20000 && nand write $loadaddr 0x40000 0x20000 && nand write $loadaddr 0x60000 0x20000
+++check_recovery=run ubi_read_recovery ; if iminfo $loadaddr ; then bootm $loadaddr ; else ubi remove recovery ; fi
+++check_ubi=ubi part ubi || run ubi_format
+++reset_factory=ubi part ubi ; ubi write 0x0 ubootenv 0x0 ; ubi write 0x0 ubootenv2 0x0 ; ubi remove rootfs_data
+++ubi_format=ubi detach ; nand erase 0x300000 0x7D00000 && ubi part ubi ; reset
+++ubi_prepare_rootfs=if ubi check rootfs_data ; then else if env exists rootfs_data_max ; then ubi create rootfs_data $rootfs_data_max dynamic || ubi create rootfs_data - dynamic ; else ubi create rootfs_data - dynamic ; fi ; fi
+++ubi_read_production=ubi read $loadaddr fit && iminfo $loadaddr && run ubi_prepare_rootfs
+++ubi_read_recovery=ubi check recovery && ubi read $loadaddr recovery
+++ubi_remove_rootfs=ubi check rootfs_data && ubi remove rootfs_data
+++ubi_write_production=run ubi_remove_rootfs ; ubi check fit && ubi remove fit ; run ubi_remove_rootfs ; ubi create fit $filesize dynamic && ubi write $loadaddr fit $filesize
+++ubi_write_recovery=run ubi_remove_rootfs ; ubi check recovery && ubi remove recovery; ubi create recovery $filesize dynamic && ubi write $loadaddr recovery $filesize
+++_create_env=ubi create ubootenv 0x100000 dynamic ; ubi create ubootenv2 0x100000 dynamic
+++_init_env=setenv _init_env ; if ubi check ubootenv && ubi check ubootenv2 ; then else run _create_env ; fi ; setenv _create_env ; saveenv || run ubi_format ; saveenv || run ubi_format
+++_firstboot=setenv _firstboot ; led power:orange on ; run _switch_to_menu ; run ethaddr_factory ; run check_ubi ; run _init_env ; run boot_first
+++_switch_to_menu=setenv _switch_to_menu ; setenv bootdelay 3 ; setenv bootmenu_delay 3 ; setenv bootmenu_0 $bootmenu_0d ; setenv bootmenu_0d ; run _bootmenu_update_title
+++_bootmenu_update_title=setenv _bootmenu_update_title ; setenv bootmenu_title "$bootmenu_title       [33m$ver[0m"
+diff --git a/package/boot/uboot-mediatek/patches/100-increase-CONFIG_SYS_BOOTM_LEN.patch b/package/boot/uboot-mediatek/patches/100-increase-CONFIG_SYS_BOOTM_LEN.patch
+new file mode 100644
+index 0000000000..811e8489dd
+--- /dev/null
++++ b/package/boot/uboot-mediatek/patches/100-increase-CONFIG_SYS_BOOTM_LEN.patch
+@@ -0,0 +1,11 @@
++--- a/include/configs/mt7622.h
+++++ b/include/configs/mt7622.h
++@@ -37,7 +37,7 @@
++ #endif
++ 
++ #define CONFIG_SYS_MAXARGS		8
++-#define CONFIG_SYS_BOOTM_LEN		SZ_64M
+++#define CONFIG_SYS_BOOTM_LEN		SZ_128M
++ #define CONFIG_SYS_CBSIZE		SZ_1K
++ #define CONFIG_SYS_PBSIZE		(CONFIG_SYS_CBSIZE +	\
++ 					sizeof(CONFIG_SYS_PROMPT) + 16)
+diff --git a/scripts/mkits.sh b/scripts/mkits.sh
+index bb629d6fca..d37c8a6669 100755
+--- a/scripts/mkits.sh
++++ b/scripts/mkits.sh
+@@ -23,18 +23,32 @@ usage() {
+ 	printf "\n\t-c ==> set config name 'config'"
+ 	printf "\n\t-a ==> set load address to 'addr' (hex)"
+ 	printf "\n\t-e ==> set entry point to 'entry' (hex)"
++	printf "\n\t-f ==> set device tree compatible string"
++	printf "\n\t-i ==> include initrd Blob 'initrd'"
+ 	printf "\n\t-v ==> set kernel version to 'version'"
+ 	printf "\n\t-k ==> include kernel image 'kernel'"
+ 	printf "\n\t-D ==> human friendly Device Tree Blob 'name'"
+ 	printf "\n\t-n ==> fdt unit-address 'address'"
+ 	printf "\n\t-d ==> include Device Tree Blob 'dtb'"
+-	printf "\n\t-o ==> create output file 'its_file'\n"
++	printf "\n\t-r ==> include RootFS blob 'rootfs'"
++	printf "\n\t-H ==> specify hash algo instead of SHA1"
++	printf "\n\t-l ==> legacy mode character (@ etc otherwise -)"
++	printf "\n\t-o ==> create output file 'its_file'"
++	printf "\n\t-O ==> create config with dt overlay 'name:dtb'"
++	printf "\n\t\t(can be specified more than once)\n"
+ 	exit 1
+ }
+ 
++REFERENCE_CHAR='-'
+ FDTNUM=1
++ROOTFSNUM=1
++INITRDNUM=1
++HASH=sha1
++LOADABLES=
++DTOVERLAY=
++DTADDR=
+ 
+-while getopts ":A:a:c:C:D:d:e:k:n:o:v:" OPTION
++while getopts ":A:a:c:C:D:d:e:f:i:k:l:n:o:O:v:r:H:" OPTION
+ do
+ 	case $OPTION in
+ 		A ) ARCH=$OPTARG;;
+@@ -44,9 +58,15 @@ do
+ 		D ) DEVICE=$OPTARG;;
+ 		d ) DTB=$OPTARG;;
+ 		e ) ENTRY_ADDR=$OPTARG;;
++		f ) COMPATIBLE=$OPTARG;;
++		i ) INITRD=$OPTARG;;
+ 		k ) KERNEL=$OPTARG;;
++		l ) REFERENCE_CHAR=$OPTARG;;
+ 		n ) FDTNUM=$OPTARG;;
+ 		o ) OUTPUT=$OPTARG;;
++		O ) DTOVERLAY="$DTOVERLAY ${OPTARG}";;
++		r ) ROOTFS=$OPTARG;;
++		H ) HASH=$OPTARG;;
+ 		v ) VERSION=$OPTARG;;
+ 		* ) echo "Invalid option passed to '$0' (options:$*)"
+ 		usage;;
+@@ -62,26 +82,120 @@ fi
+ 
+ ARCH_UPPER=$(echo "$ARCH" | tr '[:lower:]' '[:upper:]')
+ 
++if [ -n "${COMPATIBLE}" ]; then
++	COMPATIBLE_PROP="compatible = \"${COMPATIBLE}\";"
++fi
++
++[ "$DTOVERLAY" ] && {
++	dtbsize=$(wc -c "$DTB" | cut -d' ' -f1)
++	DTADDR=$(printf "0x%08x" $(($LOAD_ADDR - $dtbsize)) )
++}
++
+ # Conditionally create fdt information
+ if [ -n "${DTB}" ]; then
+ 	FDT_NODE="
+-		fdt@$FDTNUM {
++		fdt${REFERENCE_CHAR}$FDTNUM {
+ 			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} device tree blob\";
++			${COMPATIBLE_PROP}
+ 			data = /incbin/(\"${DTB}\");
+ 			type = \"flat_dt\";
++			${DTADDR:+load = <${DTADDR}>;}
++			arch = \"${ARCH}\";
++			compression = \"none\";
++			hash@1 {
++				algo = \"crc32\";
++			};
++			hash@2 {
++				algo = \"${HASH}\";
++			};
++		};
++"
++	FDT_PROP="fdt = \"fdt${REFERENCE_CHAR}$FDTNUM\";"
++fi
++
++if [ -n "${INITRD}" ]; then
++	INITRD_NODE="
++		initrd${REFERENCE_CHAR}$INITRDNUM {
++			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} initrd\";
++			${COMPATIBLE_PROP}
++			data = /incbin/(\"${INITRD}\");
++			type = \"ramdisk\";
++			arch = \"${ARCH}\";
++			os = \"linux\";
++			hash@1 {
++				algo = \"crc32\";
++			};
++			hash@2 {
++				algo = \"${HASH}\";
++			};
++		};
++"
++	INITRD_PROP="ramdisk=\"initrd${REFERENCE_CHAR}${INITRDNUM}\";"
++fi
++
++
++if [ -n "${ROOTFS}" ]; then
++	dd if="${ROOTFS}" of="${ROOTFS}.pagesync" bs=4096 conv=sync
++	ROOTFS_NODE="
++		rootfs${REFERENCE_CHAR}$ROOTFSNUM {
++			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} rootfs\";
++			${COMPATIBLE_PROP}
++			data = /incbin/(\"${ROOTFS}.pagesync\");
++			type = \"filesystem\";
+ 			arch = \"${ARCH}\";
+ 			compression = \"none\";
+ 			hash@1 {
+ 				algo = \"crc32\";
+ 			};
+ 			hash@2 {
+-				algo = \"sha1\";
++				algo = \"${HASH}\";
+ 			};
+ 		};
+ "
+-	FDT_PROP="fdt = \"fdt@$FDTNUM\";"
++	LOADABLES="${LOADABLES:+$LOADABLES, }\"rootfs${REFERENCE_CHAR}${ROOTFSNUM}\""
+ fi
+ 
++# add DT overlay blobs
++FDTOVERLAY_NODE=""
++OVCONFIGS=""
++[ "$DTOVERLAY" ] && for overlay in $DTOVERLAY ; do
++	overlay_blob=${overlay##*:}
++	ovname=${overlay%%:*}
++	ovnode="fdt-$ovname"
++	ovsize=$(wc -c "$overlay_blob" | cut -d' ' -f1)
++	echo "$ovname ($overlay_blob) : $ovsize" >&2
++	DTADDR=$(printf "0x%08x" $(($DTADDR - $ovsize)))
++	FDTOVERLAY_NODE="$FDTOVERLAY_NODE
++
++		$ovnode {
++			description = \"${ARCH_UPPER} OpenWrt ${DEVICE} device tree overlay $ovname\";
++			${COMPATIBLE_PROP}
++			data = /incbin/(\"${overlay_blob}\");
++			type = \"flat_dt\";
++			arch = \"${ARCH}\";
++			load = <${DTADDR}>;
++			compression = \"none\";
++			hash@1 {
++				algo = \"crc32\";
++			};
++			hash@2 {
++				algo = \"${HASH}\";
++			};
++		};
++"
++	OVCONFIGS="$OVCONFIGS
++
++		config-$ovname {
++			description = \"OpenWrt ${DEVICE} with $ovname\";
++			kernel = \"kernel${REFERENCE_CHAR}1\";
++			fdt = \"fdt${REFERENCE_CHAR}$FDTNUM\", \"$ovnode\";
++			${LOADABLES:+loadables = ${LOADABLES};}
++			${COMPATIBLE_PROP}
++			${INITRD_PROP}
++		};
++	"
++done
++
+ # Create a default, fully populated DTS file
+ DATA="/dts-v1/;
+ 
+@@ -90,7 +204,7 @@ DATA="/dts-v1/;
+ 	#address-cells = <1>;
+ 
+ 	images {
+-		kernel@1 {
++		kernel${REFERENCE_CHAR}1 {
+ 			description = \"${ARCH_UPPER} OpenWrt Linux-${VERSION}\";
+ 			data = /incbin/(\"${KERNEL}\");
+ 			type = \"kernel\";
+@@ -103,21 +217,28 @@ DATA="/dts-v1/;
+ 				algo = \"crc32\";
+ 			};
+ 			hash@2 {
+-				algo = \"sha1\";
++				algo = \"$HASH\";
+ 			};
+ 		};
++${INITRD_NODE}
+ ${FDT_NODE}
++${FDTOVERLAY_NODE}
++${ROOTFS_NODE}
+ 	};
+ 
+ 	configurations {
+ 		default = \"${CONFIG}\";
+ 		${CONFIG} {
+-			description = \"OpenWrt\";
+-			kernel = \"kernel@1\";
++			description = \"OpenWrt ${DEVICE}\";
++			kernel = \"kernel${REFERENCE_CHAR}1\";
+ 			${FDT_PROP}
++			${LOADABLES:+loadables = ${LOADABLES};}
++			${COMPATIBLE_PROP}
++			${INITRD_PROP}
+ 		};
++		${OVCONFIGS}
+ 	};
+ };"
+ 
+ # Write .its file to disk
+-echo "$DATA" > "${OUTPUT}"
++echo "$DATA" > "${OUTPUT}"
+\ No newline at end of file
+diff --git a/target/linux/mediatek/Makefile b/target/linux/mediatek/Makefile
+index c8ab5e01e6..0eacee0afb 100644
+--- a/target/linux/mediatek/Makefile
++++ b/target/linux/mediatek/Makefile
+@@ -6,10 +6,9 @@ ARCH:=arm
+ BOARD:=mediatek
+ BOARDNAME:=MediaTek Ralink ARM
+ SUBTARGETS:=mt7622 mt7623 mt7629
+-FEATURES:=squashfs nand ramdisk fpu
++FEATURES:=dt-overlay emmc fpu gpio nand pci pcie rootfs-part separate_ramdisk squashfs usb
+ 
+ KERNEL_PATCHVER:=5.4
+-KERNEL_TESTING_PATCHVER:=5.4
+ 
+ include $(INCLUDE_DIR)/target.mk
+ DEFAULT_PACKAGES += \
+diff --git a/target/linux/mediatek/image/Makefile b/target/linux/mediatek/image/Makefile
+index 45e83cece5..5d37b14932 100644
+--- a/target/linux/mediatek/image/Makefile
++++ b/target/linux/mediatek/image/Makefile
+@@ -6,16 +6,6 @@
+ include $(TOPDIR)/rules.mk
+ include $(INCLUDE_DIR)/image.mk
+ 
+-define Build/sysupgrade-emmc
+-	rm -f $@.recovery
+-	mkfs.fat -C $@.recovery 3070
+-
+-	./gen_$(SUBTARGET)_emmc_img.sh $@ \
+-		$(IMAGE_KERNEL) \
+-		$@.recovery \
+-		$(IMAGE_ROOTFS)
+-endef
+-
+ # default all platform image(fit) build 
+ define Device/Default
+   PROFILES = Default $$(DEVICE_NAME)
+@@ -23,7 +13,7 @@ define Device/Default
+   KERNEL = kernel-bin | lzma | \
+ 	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb
+   KERNEL_INITRAMFS = kernel-bin | lzma | \
+-	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb
++	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb with-initrd
+   FILESYSTEMS := squashfs
+   DEVICE_DTS_DIR := $(DTS_DIR)
+   IMAGES := sysupgrade.bin
+@@ -37,5 +27,4 @@ define Image/Build
+ 	$(call Image/Build/$(1),$(1))
+ endef
+ 
+-$(eval $(call BuildImage))
+-
++$(eval $(call BuildImage))
+\ No newline at end of file
+diff --git a/target/linux/mediatek/image/mt7622.mk b/target/linux/mediatek/image/mt7622.mk
+index bf706930e4..7f1355d7f0 100644
+--- a/target/linux/mediatek/image/mt7622.mk
++++ b/target/linux/mediatek/image/mt7622.mk
+@@ -1,26 +1,69 @@
+ KERNEL_LOADADDR := 0x44080000
+ 
+-define Device/bpi_bananapi-r64
+-  DEVICE_VENDOR := Bpi
+-  DEVICE_MODEL := Banana Pi R64
+-  DEVICE_DTS := mt7622-bananapi-bpi-r64
+-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+-  SUPPORTED_DEVICES := bananapi,bpi-r64
+-  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
++define Build/mmc-header
++	dd if=$(STAGING_DIR_IMAGE)/mt7622-header_$1.bin bs=512 count=1 of=$@ conv=notrunc
++endef
++
++define Build/bl2
++	cat $(STAGING_DIR_IMAGE)/mt7622-$1-bl2.img >> $@
++endef
++
++define Build/bl31-uboot
++	cat $(STAGING_DIR_IMAGE)/mt7622_$1-u-boot.fip >> $@
++endef
++
++define Build/mt7622-gpt
++	ptgen -g -o $@ -h 4 -s 31 -a 1 -l 1024 -g \
++		-t 0xef \
++		$(if $(findstring sdmmc,$1), \
++			-N bl2		-r	-p 512k@512k \
++		) \
++			-N fip		-r	-p 1M@2M \
++			-N ubootenv	-r	-p 1M@4M \
++			-N recovery	-r	-p 32M@6M \
++		$(if $(findstring sdmmc,$1), \
++			-t 0x2e -N production	-p 216M@40M \
++		) \
++		$(if $(findstring emmc,$1), \
++			-t 0x2e -N production	-p 980M@40M \
++		)
+ endef
+-TARGET_DEVICES += bpi_bananapi-r64
+ 
+-define Device/bpi_bananapi-r64-rootdisk
+-  DEVICE_VENDOR := Bpi
+-  DEVICE_MODEL := Banana Pi R64 (rootdisk)
+-  DEVICE_DTS := mt7622-bananapi-bpi-r64-rootdisk
++define Device/bananapi_bpi-r64
++  DEVICE_VENDOR := Bananapi
++  DEVICE_MODEL := BPi-R64
++  DEVICE_DTS := mt7622-bananapi-bpi-r64
+   DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+-  SUPPORTED_DEVICES := bananapi,bpi-r64
+-  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
+-  IMAGES := sysupgrade-emmc.bin.gz
+-  IMAGE/sysupgrade-emmc.bin.gz := sysupgrade-emmc | gzip | append-metadata
++  DEVICE_DTS_OVERLAY := mt7622-bananapi-bpi-r64-pcie1 mt7622-bananapi-bpi-r64-sata
++  DEVICE_PACKAGES := kmod-ata-ahci-mtk kmod-btmtkuart kmod-usb3 e2fsprogs mkf2fs f2fsck
++  ARTIFACTS := emmc-preloader.bin emmc-bl31-uboot.fip sdcard.img.gz snand-preloader.bin snand-bl31-uboot.fip
++  IMAGES := sysupgrade.itb
++  KERNEL_INITRAMFS_SUFFIX := -recovery.itb
++  ARTIFACT/emmc-preloader.bin	:= bl2 emmc-2ddr
++  ARTIFACT/emmc-bl31-uboot.fip	:= bl31-uboot bananapi_bpi-r64-emmc
++  ARTIFACT/snand-preloader.bin	:= bl2 snand-2ddr
++  ARTIFACT/snand-bl31-uboot.fip	:= bl31-uboot bananapi_bpi-r64-snand
++  ARTIFACT/sdcard.img.gz	:= mt7622-gpt sdmmc |\
++				   pad-to 512k | bl2 sdmmc-2ddr |\
++				   pad-to 2048k | bl31-uboot bananapi_bpi-r64-sdmmc |\
++				$(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),\
++				   pad-to 6144k | append-image-stage initramfs-recovery.itb | check-size 38912k |\
++				) \
++				   pad-to 38912k | mt7622-gpt emmc |\
++				   pad-to 39424k | bl2 emmc-2ddr |\
++				   pad-to 40960k | bl31-uboot bananapi_bpi-r64-emmc |\
++				   pad-to 43008k | bl2 snand-2ddr |\
++				   pad-to 43520k | bl31-uboot bananapi_bpi-r64-snand |\
++				$(if $(CONFIG_TARGET_ROOTFS_SQUASHFS),\
++				   pad-to 46080k | append-image squashfs-sysupgrade.itb | check-size | gzip \
++				)
++  IMAGE_SIZE := $$(shell expr 45 + $$(CONFIG_TARGET_ROOTFS_PARTSIZE))m
++  KERNEL			:= kernel-bin | gzip
++  KERNEL_INITRAMFS		:= kernel-bin | lzma | fit lzma $$(DTS_DIR)/$$(DEVICE_DTS).dtb with-initrd | pad-to 128k
++  IMAGE/sysupgrade.itb		:= append-kernel | fit gzip $$(DTS_DIR)/$$(DEVICE_DTS).dtb external-static-with-rootfs | append-metadata
+ endef
+-TARGET_DEVICES += bpi_bananapi-r64-rootdisk
++TARGET_DEVICES += bananapi_bpi-r64
++
+ 
+ define Device/elecom_wrc-2533gent
+   DEVICE_VENDOR := Elecom
+diff --git a/target/linux/mediatek/mt7622/target.mk b/target/linux/mediatek/mt7622/target.mk
+index cb5a6b48cd..f880d859c4 100644
+--- a/target/linux/mediatek/mt7622/target.mk
++++ b/target/linux/mediatek/mt7622/target.mk
+@@ -2,9 +2,9 @@ ARCH:=aarch64
+ SUBTARGET:=mt7622
+ BOARDNAME:=MT7622
+ CPU_TYPE:=cortex-a53
+-DEFAULT_PACKAGES += kmod-mt7615e kmod-mt7615-firmware wpad-basic-wolfssl
++DEFAULT_PACKAGES += kmod-mt7615e kmod-mt7615-firmware wpad-basic-wolfssl uboot-envtools
+ KERNELNAME:=Image dtbs
+ 
+ define Target/Description
+ 	Build firmware images for MediaTek MT7622 ARM based boards.
+-endef
++endef
+\ No newline at end of file
+diff --git a/tools/firmware-utils/Makefile b/tools/firmware-utils/Makefile
+index cec8398a27..e4a31b6fd0 100644
+--- a/tools/firmware-utils/Makefile
++++ b/tools/firmware-utils/Makefile
+@@ -28,6 +28,7 @@ define Host/Compile
+ 	$(call cc,addpattern)
+ 	$(call cc,asustrx)
+ 	$(call cc,bcm4908asus,-Wall)
++	$(call cc,bcm4908img,-Wall)
+ 	$(call cc,bcm4908kernel,-Wall)
+ 	$(call cc,buffalo-enc buffalo-lib,-Wall)
+ 	$(call cc,buffalo-tag buffalo-lib,-Wall)
+@@ -97,7 +98,6 @@ define Host/Compile
+ 	$(call cc,wrt400n cyg_crc32)
+ 	$(call cc,xorimage)
+ 	$(call cc,zyimage,-Wall)
+-	$(call cc,zytrx,-Wall)
+ 	$(call cc,zyxbcm)
+ endef
+ 
+diff --git a/tools/firmware-utils/src/bcm4908img.c b/tools/firmware-utils/src/bcm4908img.c
+new file mode 100644
+index 0000000000..86a187b146
+--- /dev/null
++++ b/tools/firmware-utils/src/bcm4908img.c
+@@ -0,0 +1,379 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (C) 2021 Rafał Miłecki <rafal@milecki.pl>
++ */
++
++#include <byteswap.h>
++#include <endian.h>
++#include <errno.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#if !defined(__BYTE_ORDER)
++#error "Unknown byte order"
++#endif
++
++#if __BYTE_ORDER == __BIG_ENDIAN
++#define cpu_to_le32(x)	bswap_32(x)
++#define le32_to_cpu(x)	bswap_32(x)
++#elif __BYTE_ORDER == __LITTLE_ENDIAN
++#define cpu_to_le32(x)	(x)
++#define le32_to_cpu(x)	(x)
++#else
++#error "Unsupported endianness"
++#endif
++
++struct bcm4908img_tail {
++	uint32_t crc32;
++	uint32_t unk1;
++	uint32_t family;
++	uint32_t unk2;
++	uint32_t unk3;
++};
++
++char *pathname;
++static size_t prefix_len;
++static size_t suffix_len;
++
++static inline size_t bcm4908img_min(size_t x, size_t y) {
++	return x < y ? x : y;
++}
++
++/**************************************************
++ * CRC32
++ **************************************************/
++
++static const uint32_t crc32_tbl[] = {
++	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba,
++	0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
++	0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
++	0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91,
++	0x1db71064, 0x6ab020f2, 0xf3b97148, 0x84be41de,
++	0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7,
++	0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec,
++	0x14015c4f, 0x63066cd9, 0xfa0f3d63, 0x8d080df5,
++	0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172,
++	0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b,
++	0x35b5a8fa, 0x42b2986c, 0xdbbbc9d6, 0xacbcf940,
++	0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59,
++	0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116,
++	0x21b4f4b5, 0x56b3c423, 0xcfba9599, 0xb8bda50f,
++	0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924,
++	0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d,
++	0x76dc4190, 0x01db7106, 0x98d220bc, 0xefd5102a,
++	0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433,
++	0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818,
++	0x7f6a0dbb, 0x086d3d2d, 0x91646c97, 0xe6635c01,
++	0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e,
++	0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457,
++	0x65b0d9c6, 0x12b7e950, 0x8bbeb8ea, 0xfcb9887c,
++	0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65,
++	0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2,
++	0x4adfa541, 0x3dd895d7, 0xa4d1c46d, 0xd3d6f4fb,
++	0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0,
++	0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9,
++	0x5005713c, 0x270241aa, 0xbe0b1010, 0xc90c2086,
++	0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f,
++	0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4,
++	0x59b33d17, 0x2eb40d81, 0xb7bd5c3b, 0xc0ba6cad,
++	0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a,
++	0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683,
++	0xe3630b12, 0x94643b84, 0x0d6d6a3e, 0x7a6a5aa8,
++	0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1,
++	0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe,
++	0xf762575d, 0x806567cb, 0x196c3671, 0x6e6b06e7,
++	0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc,
++	0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5,
++	0xd6d6a3e8, 0xa1d1937e, 0x38d8c2c4, 0x4fdff252,
++	0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b,
++	0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60,
++	0xdf60efc3, 0xa867df55, 0x316e8eef, 0x4669be79,
++	0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236,
++	0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f,
++	0xc5ba3bbe, 0xb2bd0b28, 0x2bb45a92, 0x5cb36a04,
++	0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d,
++	0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a,
++	0x9c0906a9, 0xeb0e363f, 0x72076785, 0x05005713,
++	0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38,
++	0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21,
++	0x86d3d2d4, 0xf1d4e242, 0x68ddb3f8, 0x1fda836e,
++	0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777,
++	0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c,
++	0x8f659eff, 0xf862ae69, 0x616bffd3, 0x166ccf45,
++	0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2,
++	0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db,
++	0xaed16a4a, 0xd9d65adc, 0x40df0b66, 0x37d83bf0,
++	0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9,
++	0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6,
++	0xbad03605, 0xcdd70693, 0x54de5729, 0x23d967bf,
++	0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
++	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d,
++};
++
++uint32_t bcm4908img_crc32(uint32_t crc, uint8_t *buf, size_t len) {
++	while (len) {
++		crc = crc32_tbl[(crc ^ *buf) & 0xff] ^ (crc >> 8);
++		buf++;
++		len--;
++	}
++
++	return crc;
++}
++
++/**************************************************
++ * Check
++ **************************************************/
++
++static void bcm4908img_check_parse_options(int argc, char **argv) {
++	int c;
++
++	while ((c = getopt(argc, argv, "p:s:")) != -1) {
++		switch (c) {
++		case 'p':
++			prefix_len = atoi(optarg);
++			break;
++		case 's':
++			suffix_len = atoi(optarg);
++			break;
++		}
++	}
++}
++
++static int bcm4908img_check(int argc, char **argv) {
++	struct bcm4908img_tail tail;
++	struct stat st;
++	uint8_t buf[1024];
++	uint32_t crc32;
++	size_t length;
++	size_t bytes;
++	FILE *fp;
++	int err = 0;
++
++	if (argc < 3) {
++		fprintf(stderr, "No BCM4908 image pathname passed\n");
++		err = -EINVAL;
++		goto out;
++	}
++	pathname = argv[2];
++
++	optind = 3;
++	bcm4908img_check_parse_options(argc, argv);
++
++	if (stat(pathname, &st)) {
++		fprintf(stderr, "Failed to stat %s\n", pathname);
++		err = -EIO;
++		goto out;
++	}
++
++	fp = fopen(pathname, "r");
++	if (!fp) {
++		fprintf(stderr, "Failed to open %s\n", pathname);
++		err = -EACCES;
++		goto out;
++	}
++
++	fseek(fp, prefix_len, SEEK_SET);
++
++	crc32 = 0xffffffff;
++	length = st.st_size - prefix_len - sizeof(tail) - suffix_len;
++	while (length && (bytes = fread(buf, 1, bcm4908img_min(sizeof(buf), length), fp)) > 0) {
++		crc32 = bcm4908img_crc32(crc32, buf, bytes);
++		length -= bytes;
++	}
++
++	if (length) {
++		fprintf(stderr, "Failed to read last %zd B of data from %s\n", length, pathname);
++		err = -EIO;
++		goto err_close;
++	}
++
++	if (fread(&tail, 1, sizeof(tail), fp) != sizeof(tail)) {
++		fprintf(stderr, "Failed to read BCM4908 image tail\n");
++		err = -EIO;
++		goto err_close;
++	}
++
++	if (crc32 != le32_to_cpu(tail.crc32)) {
++		fprintf(stderr, "Invalid data crc32: 0x%08x instead of 0x%08x\n", crc32, le32_to_cpu(tail.crc32));
++		err =  -EPROTO;
++		goto err_close;
++	}
++
++	printf("Found a valid BCM4908 image (crc: 0x%08x)\n", crc32);
++
++err_close:
++	fclose(fp);
++out:
++	return err;
++}
++
++/**************************************************
++ * Create
++ **************************************************/
++
++static ssize_t bcm4908img_create_append_file(FILE *trx, const char *in_path, uint32_t *crc32) {
++	FILE *in;
++	size_t bytes;
++	ssize_t length = 0;
++	uint8_t buf[1024];
++
++	in = fopen(in_path, "r");
++	if (!in) {
++		fprintf(stderr, "Failed to open %s\n", in_path);
++		return -EACCES;
++	}
++
++	while ((bytes = fread(buf, 1, sizeof(buf), in)) > 0) {
++		if (fwrite(buf, 1, bytes, trx) != bytes) {
++			fprintf(stderr, "Failed to write %zu B to %s\n", bytes, pathname);
++			length = -EIO;
++			break;
++		}
++		*crc32 = bcm4908img_crc32(*crc32, buf, bytes);
++		length += bytes;
++	}
++
++	fclose(in);
++
++	return length;
++}
++
++static ssize_t bcm4908img_create_append_zeros(FILE *trx, size_t length) {
++	uint8_t *buf;
++
++	buf = malloc(length);
++	if (!buf)
++		return -ENOMEM;
++	memset(buf, 0, length);
++
++	if (fwrite(buf, 1, length, trx) != length) {
++		fprintf(stderr, "Failed to write %zu B to %s\n", length, pathname);
++		free(buf);
++		return -EIO;
++	}
++
++	free(buf);
++
++	return length;
++}
++
++static ssize_t bcm4908img_create_align(FILE *trx, size_t cur_offset, size_t alignment) {
++	if (cur_offset & (alignment - 1)) {
++		size_t length = alignment - (cur_offset % alignment);
++		return bcm4908img_create_append_zeros(trx, length);
++	}
++
++	return 0;
++}
++
++static int bcm4908img_create(int argc, char **argv) {
++	struct bcm4908img_tail tail = {
++		.unk1 = cpu_to_le32(0x5732),
++		.family = cpu_to_le32(0x4908),
++		.unk2 = cpu_to_le32(0x03),
++		.unk3 = cpu_to_le32(0x02),
++	};
++	uint32_t crc32 = 0xffffffff;
++	size_t cur_offset = 0;
++	ssize_t bytes;
++	FILE *fp;
++	int c;
++	int err = 0;
++
++	if (argc < 3) {
++		fprintf(stderr, "No BCM4908 image pathname passed\n");
++		err = -EINVAL;
++		goto out;
++	}
++	pathname = argv[2];
++
++	fp = fopen(pathname, "w+");
++	if (!fp) {
++		fprintf(stderr, "Failed to open %s\n", pathname);
++		err = -EACCES;
++		goto out;
++	}
++
++	optind = 3;
++	while ((c = getopt(argc, argv, "f:a:A:")) != -1) {
++		switch (c) {
++		case 'f':
++			bytes = bcm4908img_create_append_file(fp, optarg, &crc32);
++			if (bytes < 0) {
++				fprintf(stderr, "Failed to append file %s\n", optarg);
++			} else {
++				cur_offset += bytes;
++			}
++			break;
++		case 'a':
++			bytes = bcm4908img_create_align(fp, cur_offset, strtol(optarg, NULL, 0));
++			if (bytes < 0)
++				fprintf(stderr, "Failed to append zeros\n");
++			else
++				cur_offset += bytes;
++			break;
++		case 'A':
++			bytes = strtol(optarg, NULL, 0) - cur_offset;
++			if (bytes < 0) {
++				fprintf(stderr, "Current BCM4908 image length is 0x%zx, can't pad it with zeros to 0x%lx\n", cur_offset, strtol(optarg, NULL, 0));
++			} else {
++				bytes = bcm4908img_create_append_zeros(fp, bytes);
++				if (bytes < 0)
++					fprintf(stderr, "Failed to append zeros\n");
++				else
++					cur_offset += bytes;
++			}
++			break;
++		}
++		if (err)
++			goto err_close;
++	}
++
++	tail.crc32 = cpu_to_le32(crc32);
++
++	bytes = fwrite(&tail, 1, sizeof(tail), fp);
++	if (bytes != sizeof(tail)) {
++		fprintf(stderr, "Failed to write BCM4908 image tail to %s\n", pathname);
++		return -EIO;
++	}
++
++err_close:
++	fclose(fp);
++out:
++	return err;
++}
++
++/**************************************************
++ * Start
++ **************************************************/
++
++static void usage() {
++	printf("Usage:\n");
++	printf("\n");
++	printf("Checking a BCM4908 image:\n");
++	printf("\tbcm4908img check <file> [options]\tcheck if images is valid\n");
++	printf("\t-p prefix\t\t\tlength of custom header to skip (default: 0)\n");
++	printf("\t-s suffix\t\t\tlength of custom tail to skip (default: 0)\n");
++	printf("\n");
++	printf("Creating a new BCM4908 image:\n");
++	printf("\tbcm4908img create <file> [options]\n");
++	printf("\t-f file\t\t\t\tadd data from specified file\n");
++	printf("\t-a alignment\t\t\tpad image with zeros to specified alignment\n");
++	printf("\t-A offset\t\t\t\tappend zeros until reaching specified offset\n");
++}
++
++int main(int argc, char **argv) {
++	if (argc > 1) {
++		if (!strcmp(argv[1], "check"))
++			return bcm4908img_check(argc, argv);
++		else if (!strcmp(argv[1], "create"))
++			return bcm4908img_create(argc, argv);
++	}
++
++	usage();
++	return 0;
++}
+diff --git a/tools/firmware-utils/src/bcm4908kernel.c b/tools/firmware-utils/src/bcm4908kernel.c
+index eaf04a0a48..fc5b2812ef 100644
+--- a/tools/firmware-utils/src/bcm4908kernel.c
++++ b/tools/firmware-utils/src/bcm4908kernel.c
+@@ -27,11 +27,11 @@
+ #endif
+ 
+ struct bcm4908kernel_header {
+-	uint32_t boot_load_addr;	/* AKA la_address */
+-	uint32_t boot_addr;		/* AKA la_entrypt */
+-	uint32_t data_len;
++	uint32_t unk1;
++	uint32_t unk2;
++	uint32_t length;
+ 	uint8_t magic[4];
+-	uint32_t uncomplen;		/* Empty for LZMA, used for LZ4 */
++	uint32_t unused;
+ };
+ 
+ static void usage() {
+@@ -103,14 +103,14 @@ int main(int argc, char **argv) {
+ 		length += bytes;
+ 	}
+ 
+-	header.boot_load_addr = cpu_to_le32(0x00080000);
+-	header.boot_addr = cpu_to_le32(0x00080000);
+-	header.data_len = cpu_to_le32(length);
++	header.unk1 = cpu_to_le32(0x00080000);
++	header.unk2 = cpu_to_le32(0x00080000);
++	header.length = cpu_to_le32(length);
+ 	header.magic[0] = 'B';
+ 	header.magic[1] = 'R';
+ 	header.magic[2] = 'C';
+ 	header.magic[3] = 'M';
+-	header.uncomplen = 0;
++	header.unused = 0;
+ 
+ 	fseek(out, 0, SEEK_SET);
+ 
+diff --git a/tools/firmware-utils/src/ptgen.c b/tools/firmware-utils/src/ptgen.c
+index 223ee29561..93c2d32a3f 100644
+--- a/tools/firmware-utils/src/ptgen.c
++++ b/tools/firmware-utils/src/ptgen.c
+@@ -52,6 +52,8 @@
+ #define swap(a, b) \
+ 	do { typeof(a) __tmp = (a); (a) = (b); (b) = __tmp; } while (0)
+ 
++#define BIT(_x)		(1UL << (_x))
++
+ typedef struct {
+ 	uint8_t b[16];
+ } guid_t;
+@@ -80,11 +82,23 @@ typedef struct {
+ 	GUID_INIT( 0x21686148, 0x6449, 0x6E6F, \
+ 			0x74, 0x4E, 0x65, 0x65, 0x64, 0x45, 0x46, 0x49)
+ 
++#define GUID_PARTITION_LINUX_FIT_GUID \
++	GUID_INIT( 0xcae9be83, 0xb15f, 0x49cc, \
++			0x86, 0x3f, 0x08, 0x1b, 0x74, 0x4a, 0x2d, 0x93)
++
++#define GUID_PARTITION_LINUX_FS_GUID \
++	GUID_INIT( 0x0fc63daf, 0x8483, 0x4772, \
++			0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4)
++
+ #define GPT_HEADER_SIZE         92
+ #define GPT_ENTRY_SIZE          128
+ #define GPT_ENTRY_MAX           128
+ #define GPT_ENTRY_NAME_SIZE     72
+ 
++#define GPT_ATTR_PLAT_REQUIRED  BIT(0)
++#define GPT_ATTR_EFI_IGNORE     BIT(1)
++#define GPT_ATTR_LEGACY_BOOT    BIT(2)
++
+ #define GPT_HEADER_SECTOR       1
+ #define GPT_FIRST_ENTRY_SECTOR  2
+ 
+@@ -109,6 +123,9 @@ struct partinfo {
+ 	unsigned long start;
+ 	unsigned long size;
+ 	int type;
++	char *name;
++	short int required;
++	guid_t guid;
+ };
+ 
+ /* GPT Partition table header */
+@@ -294,7 +311,7 @@ static int gen_ptable(uint32_t signature, int nr)
+ 		if (parts[i].start != 0) {
+ 			if (parts[i].start * 2 < start) {
+ 				fprintf(stderr, "Invalid start %ld for partition %d!\n",
+-					parts[i].start, i);
++					parts[i].start, i, start);
+ 				return ret;
+ 			}
+ 			start = parts[i].start * 2;
+@@ -381,7 +398,7 @@ static int gen_gptable(uint32_t signature, guid_t guid, unsigned nr)
+ 		if (parts[i].start != 0) {
+ 			if (parts[i].start * 2 < start) {
+ 				fprintf(stderr, "Invalid start %ld for partition %d!\n",
+-					parts[i].start, i);
++					parts[i].start, i, start);
+ 				return ret;
+ 			}
+ 			start = parts[i].start * 2;
+@@ -396,12 +413,16 @@ static int gen_gptable(uint32_t signature, guid_t guid, unsigned nr)
+ 		gpte[i].end = cpu_to_le64(sect -1);
+ 		gpte[i].guid = guid;
+ 		gpte[i].guid.b[sizeof(guid_t) -1] += i + 1;
+-		if (parts[i].type == 0xEF || (i + 1) == (unsigned)active) {
+-			gpte[i].type = GUID_PARTITION_SYSTEM;
+-			init_utf16("EFI System Partition", (uint16_t *)gpte[i].name, GPT_ENTRY_NAME_SIZE / sizeof(uint16_t));
+-		} else {
+-			gpte[i].type = GUID_PARTITION_BASIC_DATA;
+-		}
++		gpte[i].type = parts[i].guid;
++
++		if (parts[i].name)
++			init_utf16(parts[i].name, (uint16_t *)gpte[i].name, GPT_ENTRY_NAME_SIZE / sizeof(uint16_t));
++
++		if ((i + 1) == (unsigned)active)
++			gpte[i].attr |= GPT_ATTR_LEGACY_BOOT;
++
++		if (parts[i].required)
++			gpte[i].attr |= GPT_ATTR_PLAT_REQUIRED;
+ 
+ 		if (verbose)
+ 			fprintf(stderr, "Partition %d: start=%" PRIu64 ", end=%" PRIu64 ", size=%"  PRIu64 "\n",
+@@ -498,21 +519,44 @@ fail:
+ 
+ static void usage(char *prog)
+ {
+-	fprintf(stderr, "Usage: %s [-v] [-n] [-g] -h <heads> -s <sectors> -o <outputfile> [-a 0..4] [-l <align kB>] [-G <guid>] [[-t <type>] -p <size>[@<start>]...] \n", prog);
++	fprintf(stderr, "Usage: %s [-v] [-n] [-g] -h <heads> -s <sectors> -o <outputfile> [-a 0..4] [-l <align kB>] [-G <guid>] [[-t <type>] [-r] [-N <name>] -p <size>[@<start>]...] \n", prog);
+ 	exit(EXIT_FAILURE);
+ }
+ 
++static guid_t type_to_guid_and_name(unsigned char type, char **name)
++{
++	guid_t guid = GUID_PARTITION_BASIC_DATA;
++
++	switch (type) {
++		case 0xef:
++			*name = "EFI System Partition";
++			guid = GUID_PARTITION_SYSTEM;
++			break;
++		case 0x83:
++			guid = GUID_PARTITION_LINUX_FS_GUID;
++			break;
++		case 0x2e:
++			guid = GUID_PARTITION_LINUX_FIT_GUID;
++			break;
++	}
++
++	return guid;
++}
++
+ int main (int argc, char **argv)
+ {
+ 	unsigned char type = 0x83;
+ 	char *p;
+ 	int ch;
+ 	int part = 0;
++	char *name = NULL;
++	unsigned short int required = 0;
+ 	uint32_t signature = 0x5452574F; /* 'OWRT' */
+ 	guid_t guid = GUID_INIT( signature, 0x2211, 0x4433, \
+ 			0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0x00);
++	guid_t part_guid = GUID_PARTITION_BASIC_DATA;
+ 
+-	while ((ch = getopt(argc, argv, "h:s:p:a:t:o:vngl:S:G:")) != -1) {
++	while ((ch = getopt(argc, argv, "h:s:p:a:t:o:vnN:gl:rS:G:")) != -1) {
+ 		switch (ch) {
+ 		case 'o':
+ 			filename = optarg;
+@@ -543,11 +587,28 @@ int main (int argc, char **argv)
+ 				parts[part].start = to_kbytes(p);
+ 			}
+ 			parts[part].size = to_kbytes(optarg);
++			parts[part].required = required;
++			parts[part].name = name;
++			parts[part].guid = part_guid;
+ 			fprintf(stderr, "part %ld %ld\n", parts[part].start, parts[part].size);
+ 			parts[part++].type = type;
++			/*
++			 * reset 'name' and 'required'
++			 * 'type' is deliberately inherited from the previous delcaration
++			 */
++			name = NULL;
++			required = 0;
++			part_guid = type_to_guid_and_name(type, &name);
++			break;
++		case 'N':
++			name = optarg;
++			break;
++		case 'r':
++			required = 1;
+ 			break;
+ 		case 't':
+ 			type = (char)strtoul(optarg, NULL, 16);
++			part_guid = type_to_guid_and_name(type, &name);
+ 			break;
+ 		case 'a':
+ 			active = (int)strtoul(optarg, NULL, 0);
+diff --git a/tools/firmware-utils/src/tplink-safeloader.c b/tools/firmware-utils/src/tplink-safeloader.c
+index 3a7d8d912e..da73e1bf30 100644
+--- a/tools/firmware-utils/src/tplink-safeloader.c
++++ b/tools/firmware-utils/src/tplink-safeloader.c
+@@ -154,7 +154,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -276,7 +277,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -354,7 +356,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -395,7 +398,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -439,7 +443,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -478,7 +483,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -517,7 +523,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -548,7 +555,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -579,7 +587,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -611,7 +620,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -643,7 +653,8 @@ static struct device_info boards[] = {
+ 			{"default-mac", 0x30000, 0x00020},
+ 			{"product-info", 0x31100, 0x00100},
+ 			{"signature", 0x32000, 0x00400},
+-			{"firmware", 0x40000, 0x770000},
++			{"os-image", 0x40000, 0x300000},
++			{"file-system", 0x340000, 0x470000},
+ 			{"soft-version", 0x7b0000, 0x00100},
+ 			{"support-list", 0x7b1000, 0x00400},
+ 			{"user-config", 0x7c0000, 0x10000},
+@@ -663,7 +674,7 @@ static struct device_info boards[] = {
+ 		.vendor = "",
+ 		.support_list =
+ 			"SupportList:\r\n"
+-			"{product_name:AD7200,product_ver:1.0.0,special_id:00000000}\r\n",
++			"{product_name:Talon AD7200,product_ver:1.0.0,special_id:00000000}\r\n",
+ 		.part_trail = 0x00,
+ 		.soft_ver = NULL,
+ 
+@@ -761,7 +772,7 @@ static struct device_info boards[] = {
+ 			"{product_name:Archer A7,product_ver:5.0.0,special_id:54570000}\n"
+ 			"{product_name:Archer A7,product_ver:5.0.0,special_id:52550000}\n",
+ 		.part_trail = 0x00,
+-		.soft_ver = "soft_ver:7.0.0\n",
++		.soft_ver = "soft_ver:1.0.0\n",
+ 
+ 		/* We're using a dynamic kernel/rootfs split here */
+ 		.partitions = {
+@@ -1048,78 +1059,7 @@ static struct device_info boards[] = {
+ 		.first_sysupgrade_partition = "os-image",
+ 		.last_sysupgrade_partition = "file-system",
+ 	},
+-	/** Firmware layout for the Archer A6 v3  */
+-	{
+-		.id     = "ARCHER-A6-V3",
+-		.vendor = "",
+-		.support_list =
+-			"SupportList:\n"
+-			"{product_name:Archer A6,product_ver:3.0.0,special_id:55530000}\n"
+-			"{product_name:Archer A6,product_ver:3.0.0,special_id:54570000}\n",
+-		.part_trail = 0x00,
+-		.soft_ver = "soft_ver:1.0.5\n",
+-
+-		.partitions = {
+-			{"fs-uboot", 0x00000, 0x40000},
+-			{"firmware", 0x40000, 0xf60000},
+-			{"default-mac", 0xfa0000, 0x00200},
+-			{"pin", 0xfa0200, 0x00100},
+-			{"device-id", 0xfa0300, 0x00100},
+-			{"product-info", 0xfa0400, 0x0fc00},
+-			{"default-config", 0xfb0000, 0x08000},
+-			{"ap-def-config", 0xfb8000, 0x08000},
+-			{"user-config", 0xfc0000, 0x0a000},
+-			{"ag-config", 0xfca000, 0x04000},
+-			{"certificate", 0xfce000, 0x02000},
+-			{"ap-config", 0xfd0000, 0x06000},
+-			{"router-config", 0xfd6000, 0x06000},
+-			{"favicon", 0xfdc000, 0x02000},
+-			{"logo", 0xfde000, 0x02000},
+-			{"partition-table", 0xfe0000, 0x00800},
+-			{"soft-version", 0xfe0800, 0x00100},
+-			{"support-list", 0xfe0900, 0x00200},
+-			{"profile", 0xfe0b00, 0x03000},
+-			{"extra-para", 0xfe3b00, 0x00100},
+-			{"radio", 0xff0000, 0x10000},
+-			{NULL, 0, 0}
+-		},
+-		.first_sysupgrade_partition = "os-image",
+-		.last_sysupgrade_partition = "file-system",
+-	},
+-	/** Firmware layout for the Archer C6U v1 */
+-	{
+-		.id     = "ARCHER-C6U-V1",
+-		.vendor = "",
+-		.support_list =
+-			"SupportList:\n"
+-			"{product_name:Archer C6U,product_ver:1.0.0,special_id:45550000}\n",
+-		.part_trail = 0x00,
+-		.soft_ver = "soft_ver:1.0.2\n",
+ 
+-		.partitions = {
+-			{"fs-uboot", 0x00000, 0x40000},
+-			{"firmware", 0x40000, 0xf60000},
+-			{"default-mac", 0xfa0000, 0x00200},
+-			{"pin", 0xfa0200, 0x00100},
+-			{"device-id", 0xfa0300, 0x00100},
+-			{"product-info", 0xfa0400, 0x0fc00},
+-			{"default-config", 0xfb0000, 0x08000},
+-			{"ap-def-config", 0xfb8000, 0x08000},
+-			{"user-config", 0xfc0000, 0x0c000},
+-			{"certificate", 0xfcc000, 0x04000},
+-			{"ap-config", 0xfd0000, 0x08000},
+-			{"router-config", 0xfd8000, 0x08000},
+-			{"partition-table", 0xfe0000, 0x00800},
+-			{"soft-version", 0xfe0800, 0x00100},
+-			{"support-list", 0xfe0900, 0x00200},
+-			{"profile", 0xfe0b00, 0x03000},
+-			{"extra-para", 0xfe3b00, 0x00100},
+-			{"radio", 0xff0000, 0x10000},
+-			{NULL, 0, 0}
+-		},
+-		.first_sysupgrade_partition = "os-image",
+-		.last_sysupgrade_partition = "file-system",
+-	},
+ 	/** Firmware layout for the C60v1 */
+ 	{
+ 		.id     = "ARCHER-C60-V1",
+@@ -1322,7 +1262,7 @@ static struct device_info boards[] = {
+ 			"{product_name:Archer C7,product_ver:5.0.0,special_id:4B520000}\n",
+ 
+ 		.part_trail = 0x00,
+-		.soft_ver = "soft_ver:7.0.0\n",
++		.soft_ver = "soft_ver:1.0.0\n",
+ 
+ 		/* We're using a dynamic kernel/rootfs split here */
+ 		.partitions = {
+@@ -2884,8 +2824,7 @@ static void build_image(const char *output,
+ 	parts[4] = read_file("file-system", rootfs_image, add_jffs2_eof, file_system_partition);
+ 
+ 	/* Some devices need the extra-para partition to accept the firmware */
+-	if (strcasecmp(info->id, "ARCHER-A6-V3") == 0 ||
+-	    strcasecmp(info->id, "ARCHER-A7-V5") == 0 ||
++	if (strcasecmp(info->id, "ARCHER-A7-V5") == 0 ||
+ 	    strcasecmp(info->id, "ARCHER-C2-V3") == 0 ||
+ 	    strcasecmp(info->id, "ARCHER-C7-V4") == 0 ||
+ 	    strcasecmp(info->id, "ARCHER-C7-V5") == 0 ||
+@@ -2893,7 +2832,6 @@ static void build_image(const char *output,
+ 	    strcasecmp(info->id, "ARCHER-C59-V2") == 0 ||
+ 	    strcasecmp(info->id, "ARCHER-C60-V2") == 0 ||
+ 	    strcasecmp(info->id, "ARCHER-C60-V3") == 0 ||
+-	    strcasecmp(info->id, "ARCHER-C6U-V1") == 0 ||
+ 	    strcasecmp(info->id, "TLWR1043NV5") == 0) {
+ 		const uint8_t extra_para[2] = {0x01, 0x00};
+ 		parts[5] = make_extra_para(info, extra_para,
+diff --git a/tools/firmware-utils/src/zytrx.c b/tools/firmware-utils/src/zytrx.c
+deleted file mode 100644
+index 7167679206..0000000000
+--- a/tools/firmware-utils/src/zytrx.c
++++ /dev/null
+@@ -1,228 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-only
+-/*
+- * zytrx - add header to images for ZyXEL NR7101
+- *
+- * Based on add_header.c - partially based on OpenWrt's
+- * motorola-bin.c
+- *
+- * Copyright (C) 2008 Imre Kaloz  <kaloz@openwrt.org>
+- *                    Gabor Juhos <juhosg@openwrt.org>
+- * Copyright (C) 2021 Bjørn Mork <bjorn@mork.no>
+-
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License,
+- * version 2 as published by the Free Software Foundation.
+- */
+-
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <stddef.h>
+-#include <unistd.h>
+-#include <errno.h>
+-#include <fcntl.h>
+-#include <sys/mman.h>
+-#include <sys/stat.h>
+-#include <string.h>
+-#include <netinet/in.h>
+-#include <inttypes.h>
+-
+-#define BPB 8 /* bits/byte */
+-
+-static uint32_t crc32[1<<BPB];
+-
+-static void init_crc32(void)
+-{
+-	const uint32_t poly = ntohl(0x2083b8ed);
+-	int n;
+-
+-	for (n = 0; n < 1<<BPB; n++) {
+-		uint32_t crc = n;
+-		int bit;
+-
+-		for (bit = 0; bit < BPB; bit++)
+-			crc = (crc & 1) ? (poly ^ (crc >> 1)) : (crc >> 1);
+-		crc32[n] = crc;
+-	}
+-}
+-
+-static uint32_t crc32buf(const unsigned char *buf, size_t len)
+-{
+-	uint32_t crc = 0xFFFFFFFF;
+-
+-	for (; len; len--, buf++)
+-		crc = crc32[(uint8_t)crc ^ *buf] ^ (crc >> BPB);
+-	return ~crc;
+-}
+-
+-/* HDR0 reversed, to be stored as BE */
+-#define MAGIC		0x30524448  /* HDR0 reversed, to be stored as BE */
+-
+-/* All numbers are stored as BE */
+-struct zytrx_t {
+-	uint32_t magic;
+-	uint32_t len_h;		/* Length of this header */
+-	uint32_t len_t;		/* Total length of file  */
+-	uint32_t crc32_p;	/* Bit inverted 32-bit CRC of image payload */
+-	uint8_t  verInt[32];	/* String "5.0.0.0\n" zero padded */
+-	uint8_t  verExt[32];	/* String "\n" zero padded */
+-	uint32_t len_p;		/* Length of image payload */
+-	uint8_t  pad1[12];	/* zero padding(?) */
+-	uint8_t  code[164];	/* string "3 6035 122 0\n" zero padded */
+-	uint8_t  chipid[8];	/* string "MT7621A" zero padded */
+-	uint8_t  boardid[16];	/* string "NR7101" zero padded */
+-	uint32_t modelid;	/* modelid as 4 BCD digits: 0x07010001 */
+-	uint8_t  pad2[8];	/* zero padding(?) */
+-	uint8_t  swVersionInt[32];	/* ZyXEL version string: "1.00(ABUV.0)D0" zero padded */
+-	uint8_t  swVersionExt[32];	/* identical to swVersionInt  */
+-	uint8_t  pad4[4];	/* zero padding(?) */
+-	uint32_t kernelChksum;	/* no idea how this is computed - reported but not validated */
+-	uint8_t  pad5[4];	/* zero padding(?) */
+-	uint32_t crc32_h;	/* Bit inverted 32-bit CRC of this header payload */
+-	uint8_t  pad6[4];	/* zero padding(?) */
+-};
+-
+-/* static?() field values of unknown meaning - maybe ove to board
+- * table when we know the significance
+- */
+-#define VER_INT		"5.0.0.0\n"
+-#define VER_EXT		"\n"
+-#define CODE		"3 6035 122 0\n"
+-#define KERNELCHKSUM	0x12345678
+-
+-/* table of supported devices using this header format */
+-static struct board_t {
+-	uint8_t  chipid[8];
+-	uint8_t  boardid[16];
+-	uint32_t modelid;
+-} boards[] = {
+-	{ "MT7621A", "NR7101", 0x07010001 },
+-	{}
+-};
+-
+-static int find_board(struct zytrx_t *h, char *board)
+-{
+-	struct board_t *p;
+-
+-	for (p = boards; p->modelid; p++) {
+-		if (strncmp((const char *)p->boardid, board, sizeof(p->boardid)))
+-			continue;
+-		memcpy(h->chipid, p->chipid, sizeof(h->chipid));
+-		memcpy(h->boardid, p->boardid, sizeof(h->boardid));
+-		h->modelid = htonl(p->modelid);
+-		return 0;
+-	}
+-	return -1;
+-}
+-
+-static void usage(const char *name)
+-{
+-	struct board_t *p;
+-
+-	fprintf(stderr, "Usage:\n");
+-	fprintf(stderr, " %s -B <board> -v <versionstr> -i <file> [-o <outputfile>]\n\n", name);
+-	fprintf(stderr, "Supported <board> values:\n");
+-	for (p = boards; p->modelid; p++)
+-		fprintf(stderr, "\t%-12s\n", p->boardid);
+-	fprintf(stderr, "\nExample:\n");
+-	fprintf(stderr, " %s -B %s -v foobar-1.0 -i my.img -o out.img\n\n", name,
+-		boards[0].boardid);
+-	exit(EXIT_FAILURE);
+-}
+-
+-static void errexit(const char *msg)
+-{
+-	fprintf(stderr, "ERR: %s: %s\n", msg, errno ? strerror(errno) : "unknown");
+-	exit(EXIT_FAILURE);
+-}
+-
+-static void *map_input(const char *name, size_t *len)
+-{
+-	struct stat stat;
+-	void *mapped;
+-	int fd;
+-
+-	fd = open(name, O_RDONLY);
+-	if (fd < 0)
+-		return NULL;
+-	if (fstat(fd, &stat) < 0) {
+-		close(fd);
+-		return NULL;
+-	}
+-	*len = stat.st_size;
+-	mapped = mmap(NULL, stat.st_size, PROT_READ, MAP_SHARED, fd, 0);
+-	if (close(fd) < 0) {
+-		(void) munmap(mapped, stat.st_size);
+-		return NULL;
+-	}
+-	return mapped;
+-}
+-
+-int main(int argc, char **argv)
+-{
+-	int c, fdout = STDOUT_FILENO;
+-	void *input_file = NULL;
+-	size_t file_len, len;
+-	uint32_t crc;
+-	struct zytrx_t h = {
+-		.magic		= htonl(MAGIC),
+-		.len_h		= htonl(sizeof(h)),
+-		.verInt		= VER_INT,
+-		.verExt		= VER_EXT,
+-		.code		= CODE,
+-		.kernelChksum	= htonl(KERNELCHKSUM),
+-	};
+-
+-	while ((c = getopt(argc, argv, "B:v:i:o:")) != -1) {
+-		switch (c) {
+-		case 'B':
+-			if (find_board(&h, optarg) < 0)
+-				errexit("unsupported board");
+-			break;
+-		case 'v':
+-			len = strlen(optarg);
+-			if (len > sizeof(h.swVersionInt))
+-				errexit("version string too long");
+-			memcpy(h.swVersionInt, optarg, len);
+-			memcpy(h.swVersionExt, optarg, len);
+-			break;
+-		case 'i':
+-			input_file = map_input(optarg, &file_len);
+-			if (!input_file)
+-				errexit(optarg);
+-			break;
+-		case 'o':
+-			fdout = open(optarg, O_WRONLY | O_CREAT, 0644);
+-			if (fdout < 0)
+-				errexit(optarg);
+-			break;
+-		default:
+-			usage(argv[0]);
+-		}
+-	}
+-
+-	/* required paremeters */
+-	if (!input_file || !h.modelid || !h.swVersionInt[0])
+-		usage(argv[0]);
+-
+-	/* length fields */
+-	h.len_t = htonl(sizeof(h) + file_len);
+-	h.len_p = htonl(file_len);
+-
+-	/* crc fields */
+-	init_crc32();
+-	crc = crc32buf(input_file, file_len);
+-	h.crc32_p = htonl(~crc);
+-	crc = crc32buf((unsigned char *)&h, sizeof(h));
+-	h.crc32_h = htonl(~crc);
+-
+-	/* dump new image */
+-	write(fdout, &h, sizeof(h));
+-	write(fdout, input_file, file_len);
+-
+-	/* close files */
+-	munmap(input_file, file_len);
+-	if (fdout != STDOUT_FILENO)
+-		close(fdout);
+-
+-	return EXIT_SUCCESS;
+-}
+-- 
+2.34.1
+
