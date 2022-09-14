@@ -1,7 +1,7 @@
-From f94737d6b5fdf2cf6811e30b341e8fc5fbdb551e Mon Sep 17 00:00:00 2001
+From 48893a721392b9da94dcddee61d2237aeced5035 Mon Sep 17 00:00:00 2001
 From: TorGuard Ops <ops@torguard.net>
-Date: Wed, 14 Sep 2022 03:59:54 +0000
-Subject: [PATCH] R64 Fix
+Date: Wed, 14 Sep 2022 12:18:05 +0000
+Subject: [PATCH] BPI R64 Compile Image
 
 ---
  include/image-commands.mk                     |   4 +
@@ -24,7 +24,7 @@ Subject: [PATCH] R64 Fix
  scripts/mkits.sh                              | 141 +++++-
  target/linux/mediatek/Makefile                |   3 +-
  target/linux/mediatek/image/Makefile          |  15 +-
- target/linux/mediatek/image/mt7622.mk         |  77 +++-
+ target/linux/mediatek/image/mt7622.mk         |  65 ++-
  target/linux/mediatek/mt7622/target.mk        |   4 +-
  tools/firmware-utils/Makefile                 |   2 +-
  tools/firmware-utils/src/bcm4908img.c         | 379 +++++++++++++++
@@ -32,7 +32,7 @@ Subject: [PATCH] R64 Fix
  tools/firmware-utils/src/ptgen.c              |  81 +++-
  tools/firmware-utils/src/tplink-safeloader.c  | 114 ++---
  tools/firmware-utils/src/zytrx.c              | 228 ---------
- 28 files changed, 2009 insertions(+), 541 deletions(-)
+ 28 files changed, 1997 insertions(+), 541 deletions(-)
  create mode 100644 package/boot/uboot-mediatek/patches/006-cmd-button-return-button-status.patch
  create mode 100644 package/boot/uboot-mediatek/patches/007-env-readmem.patch
  create mode 100644 package/boot/uboot-mediatek/patches/008-bootmenu-custom-title.patch
@@ -2275,10 +2275,10 @@ index 45e83cece5..5d37b14932 100644
 +$(eval $(call BuildImage))
 \ No newline at end of file
 diff --git a/target/linux/mediatek/image/mt7622.mk b/target/linux/mediatek/image/mt7622.mk
-index bf706930e4..7f1355d7f0 100644
+index bf706930e4..51af0066a1 100644
 --- a/target/linux/mediatek/image/mt7622.mk
 +++ b/target/linux/mediatek/image/mt7622.mk
-@@ -1,26 +1,69 @@
+@@ -1,26 +1,57 @@
  KERNEL_LOADADDR := 0x44080000
  
 -define Device/bpi_bananapi-r64
@@ -2290,8 +2290,13 @@ index bf706930e4..7f1355d7f0 100644
 -  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
 +define Build/mmc-header
 +	dd if=$(STAGING_DIR_IMAGE)/mt7622-header_$1.bin bs=512 count=1 of=$@ conv=notrunc
-+endef
-+
+ endef
+-TARGET_DEVICES += bpi_bananapi-r64
+ 
+-define Device/bpi_bananapi-r64-rootdisk
+-  DEVICE_VENDOR := Bpi
+-  DEVICE_MODEL := Banana Pi R64 (rootdisk)
+-  DEVICE_DTS := mt7622-bananapi-bpi-r64-rootdisk
 +define Build/bl2
 +	cat $(STAGING_DIR_IMAGE)/mt7622-$1-bl2.img >> $@
 +endef
@@ -2315,13 +2320,8 @@ index bf706930e4..7f1355d7f0 100644
 +		$(if $(findstring emmc,$1), \
 +			-t 0x2e -N production	-p 980M@40M \
 +		)
- endef
--TARGET_DEVICES += bpi_bananapi-r64
- 
--define Device/bpi_bananapi-r64-rootdisk
--  DEVICE_VENDOR := Bpi
--  DEVICE_MODEL := Banana Pi R64 (rootdisk)
--  DEVICE_DTS := mt7622-bananapi-bpi-r64-rootdisk
++endef
++
 +define Device/bananapi_bpi-r64
 +  DEVICE_VENDOR := Bananapi
 +  DEVICE_MODEL := BPi-R64
@@ -2331,37 +2331,25 @@ index bf706930e4..7f1355d7f0 100644
 -  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk
 -  IMAGES := sysupgrade-emmc.bin.gz
 -  IMAGE/sysupgrade-emmc.bin.gz := sysupgrade-emmc | gzip | append-metadata
-+  DEVICE_DTS_OVERLAY := mt7622-bananapi-bpi-r64-pcie1 mt7622-bananapi-bpi-r64-sata
-+  DEVICE_PACKAGES := kmod-ata-ahci-mtk kmod-btmtkuart kmod-usb3 e2fsprogs mkf2fs f2fsck
-+  ARTIFACTS := emmc-preloader.bin emmc-bl31-uboot.fip sdcard.img.gz snand-preloader.bin snand-bl31-uboot.fip
++  DEVICE_PACKAGES := kmod-usb-ohci kmod-usb2 kmod-usb3 kmod-ata-ahci-mtk \
++		     kmod-mt7615e kmod-mt7615-firmware \
++		     uboot-mt7622_bananapi_bpi-r64-emmc \
++		     uboot-mt7622_bananapi_bpi-r64-sdmmc \
++		     e2fsprogs mkf2fs f2fsck \
++		     kmod-nls-cp437 kmod-nls-iso8859-1 kmod-vfat blockd
++  ARTIFACTS := header-emmc.bin sdcard.img
 +  IMAGES := sysupgrade.itb
 +  KERNEL_INITRAMFS_SUFFIX := -recovery.itb
-+  ARTIFACT/emmc-preloader.bin	:= bl2 emmc-2ddr
-+  ARTIFACT/emmc-bl31-uboot.fip	:= bl31-uboot bananapi_bpi-r64-emmc
-+  ARTIFACT/snand-preloader.bin	:= bl2 snand-2ddr
-+  ARTIFACT/snand-bl31-uboot.fip	:= bl31-uboot bananapi_bpi-r64-snand
-+  ARTIFACT/sdcard.img.gz	:= mt7622-gpt sdmmc |\
-+				   pad-to 512k | bl2 sdmmc-2ddr |\
-+				   pad-to 2048k | bl31-uboot bananapi_bpi-r64-sdmmc |\
-+				$(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),\
-+				   pad-to 6144k | append-image-stage initramfs-recovery.itb | check-size 38912k |\
-+				) \
-+				   pad-to 38912k | mt7622-gpt emmc |\
-+				   pad-to 39424k | bl2 emmc-2ddr |\
-+				   pad-to 40960k | bl31-uboot bananapi_bpi-r64-emmc |\
-+				   pad-to 43008k | bl2 snand-2ddr |\
-+				   pad-to 43520k | bl31-uboot bananapi_bpi-r64-snand |\
-+				$(if $(CONFIG_TARGET_ROOTFS_SQUASHFS),\
-+				   pad-to 46080k | append-image squashfs-sysupgrade.itb | check-size | gzip \
-+				)
-+  IMAGE_SIZE := $$(shell expr 45 + $$(CONFIG_TARGET_ROOTFS_PARTSIZE))m
++  ARTIFACT/header-emmc.bin	:= mt7622-gpt  emmc | mmc-header  emmc
++  ARTIFACT/sdcard.img		:= mt7622-gpt sdmmc | mmc-header sdmmc | pad-to 128k | append-image header-emmc.bin | pad-to 256k |\
++				   bl2 emmc-2ddr | pad-to 512k | bl2 sdmmc-2ddr | pad-to 1M | bl31-uboot bananapi_bpi-r64-emmc | pad-to 2M |\
++				   bl31-uboot bananapi_bpi-r64-sdmmc | pad-to 6M
 +  KERNEL			:= kernel-bin | gzip
-+  KERNEL_INITRAMFS		:= kernel-bin | lzma | fit lzma $$(DTS_DIR)/$$(DEVICE_DTS).dtb with-initrd | pad-to 128k
-+  IMAGE/sysupgrade.itb		:= append-kernel | fit gzip $$(DTS_DIR)/$$(DEVICE_DTS).dtb external-static-with-rootfs | append-metadata
++  KERNEL_INITRAMFS		:= kernel-bin | lzma | fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb with-initrd | pad-to 128k
++  IMAGE/sysupgrade.itb		:= append-kernel | fit gzip $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb external-static-with-rootfs | append-metadata
  endef
 -TARGET_DEVICES += bpi_bananapi-r64-rootdisk
 +TARGET_DEVICES += bananapi_bpi-r64
-+
  
  define Device/elecom_wrc-2533gent
    DEVICE_VENDOR := Elecom

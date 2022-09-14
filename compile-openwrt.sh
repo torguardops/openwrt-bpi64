@@ -48,6 +48,15 @@ say "Cloning openwrt"
 git clone -b "v${OPENWRT_VERSION}" https://git.openwrt.org/openwrt/openwrt.git
 cd openwrt
 
+# If we have any patches to install, do it now
+say "Installing Patches"
+if [ -d "${BASEDIR}/patches" ]; then
+    for patch in $(find "${BASEDIR}/patches" -type f -name '*.patch'); do
+        say "Applying patch ${patch}"
+        patch -p1 < "${patch}"
+    done
+fi
+
 # Set our compile package feeds.conf
 say "Creating our own feeds.conf"
 cat << EOF > feeds.conf
@@ -61,15 +70,6 @@ EOF
 say "Updating and Installing Feeds"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
-
-# If we have any patches to install, do it now
-say "Running Patches"
-if [ -d "${BASEDIR}/patches" ]; then
-    for patch in $(find "${BASEDIR}/patches" -type f -name '*.patch'); do
-        say "Applying patch ${patch}"
-        patch -p1 < "${patch}"
-    done
-fi
 
 # Copy in the custom files directory if it exists - this adds our scripts and files to openwrt
 [ -d "${BASEDIR}/files" ] && { say "Copying our custom files into openwrt folder"; cp -R "${BASEDIR}/files/" "${BASEDIR}/openwrt/"; } || { say "No files directory found"; exit 1; }
