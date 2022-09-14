@@ -89,6 +89,5 @@ done
 say "Running make defconfig to generate .config"
 make defconfig
 
-# Go forth and build our OpenWRT image
-say "Running the actual make process with $(nproc) processors"
-make -j$(nproc)
+# Build with full debug if local, otherwise normal build
+[ "$(uname -n)" == "ops" ] && { say "Building OpenWRT Full Debug"; make -j$(nproc) V=s; } || { say "Building OpenWRT"; make -j$(nproc); }
