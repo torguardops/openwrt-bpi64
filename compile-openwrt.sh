@@ -57,14 +57,10 @@ if [ -d "${BASEDIR}/patches" ]; then
     done
 fi
 
-# Set our compile package feeds.conf
-say "Creating our own feeds.conf"
-cat << EOF > feeds.conf
-src-git-full packages https://git.openwrt.org/feed/packages.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full luci https://git.openwrt.org/project/luci.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full routing https://git.openwrt.org/feed/routing.git;${OPENWRT_PACKAGES_BRANCH}
-src-git-full telephony https://git.openwrt.org/feed/telephony.git;${OPENWRT_PACKAGES_BRANCH}
-EOF
+# Copy in our config and feed
+say "Copy our custom config feed and .config"
+cp "${BASEDIR}/configs/config.buildinfo" "${BASEDIR}/openwrt/.config"
+cp "${BASEDIR}/configs/feeds.buildinfo" "${BASEDIR}/openwrt/feeds.conf"
 
 # Run feed commands pre-build, do this before creating our .config as it did not work when ran after
 say "Updating and Installing Feeds"
@@ -74,15 +70,11 @@ say "Updating and Installing Feeds"
 # Copy in the custom files directory if it exists - this adds our scripts and files to openwrt
 [ -d "${BASEDIR}/files" ] && { say "Copying our custom files into openwrt folder"; cp -R "${BASEDIR}/files/" "${BASEDIR}/openwrt/"; } || { say "No files directory found"; exit 1; }
 
-# Download our "base" .config from openwrt
-say "Copy our custom config as .config"
-cp "${BASEDIR}/config" "${BASEDIR}/openwrt/.config"
-
 # Write the packages we want to install to the .config
 say "Add our requested packages to the .config"
 for PACKAGE in ${PACKAGES}; do
     say "Adding ${PACKAGE} to .config"
-    echo "CONFIG_PACKAGE_${PACKAGE}=y" >> .config
+    echo "CONFIG_PACKAGE_${PACKAGE}=m" >> .config
 done
 
 # Generate our final .config for image building

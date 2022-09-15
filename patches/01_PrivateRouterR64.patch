@@ -1712,8 +1712,8 @@ index 0000000000..838970cd64
 +--- /dev/null
 ++++ b/bananapi_bpi-r64-sdmmc_env
 +@@ -0,0 +1,54 @@
-++ipaddr=192.168.1.1
-++serverip=192.168.1.254
+++ipaddr=192.168.0.45
+++serverip=192.168.0.100
 ++loadaddr=0x4007ff28
 ++bootcmd=run boot_sdmmc
 ++bootargs=earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk1p6
@@ -1895,8 +1895,8 @@ index 0000000000..838970cd64
 +--- /dev/null
 ++++ b/bananapi_bpi-r64-emmc_env
 +@@ -0,0 +1,43 @@
-++ipaddr=192.168.1.1
-++serverip=192.168.1.254
+++ipaddr=192.168.0.45
+++serverip=192.168.0.100
 ++loadaddr=0x4007ff28
 ++bootcmd=run boot_emmc
 ++bootargs=earlycon=uart8250,mmio32,0x11002000 console=ttyS0,115200n1 swiotlb=512 root=/dev/mmcblk0p5
@@ -2325,8 +2325,8 @@ index 0000000000..711c1e6983
 +@@ -0,0 +1,57 @@
 ++mtdparts=nand0:512k(bl2),1280k(fip),1024k(factory),256k(reserved),-(ubi)
 ++ethaddr_factory=nand read 0x40080000 0x220000 0x20000 && env readmem -b ethaddr 0x4009fff4 0x6 ; setenv ethaddr_factory
-++ipaddr=192.168.1.1
-++serverip=192.168.1.254
+++ipaddr=192.168.0.45
+++serverip=192.168.0.100
 ++loadaddr=0x4007ff28
 ++bootcmd=run boot_ubi
 ++bootdelay=0
